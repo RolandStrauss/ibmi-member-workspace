@@ -27,6 +27,7 @@ import {
   sourceFileLayout,
   memberChangeStamps,
   getSystemName,
+  downloadSourceDates,
 } from "./codeForIBMi";
 import { CheckoutCancelledError, LocalFileMissingError, ReferenceCopyError, RemoteMemberMissingError, errorMessage } from "./errors";
 import {
@@ -41,6 +42,7 @@ import {
   statusAfterUpload,
 } from "./sync";
 import { BASELINE_DIR, BaselineFiles, BaselineStore, referencedBaselineHashes } from "./baselineStore";
+import { DATES_DIR, DateStore } from "./dateStore";
 import { MergeSide, baselineAfterMergeSave } from "./mergePreparation";
 import {
   GitOperationResult,
@@ -85,6 +87,9 @@ const LOGGED_PROBLEMS = 10;
 
 type RefreshProgress = vscode.Progress<{ message?: string; increment?: number }>;
 
+/** The `sourceDates` setting: no dates, dates on hover, or dates in the gutter too. */
+export type SourceDatesMode = "off" | "hover" | "gutter";
+
 export interface CheckoutOptions {
   redownloadBehavior?: "ask" | "skip" | "force";
   suppressAutoOpen?: boolean;
@@ -113,6 +118,11 @@ export class CheckoutService implements vscode.Disposable {
   private readonly store: CheckoutIndexStore;
   /** The text behind each checkout's baseline hash, for three-way Merge Back. */
   private readonly baselines: BaselineStore;
+  /** The source dates of baseline texts; see `keepSourceDates`. */
+  private readonly dates: DateStore;
+  private readonly _onDidChangeSourceDates = new vscode.EventEmitter<void>();
+  /** Fires when a member's source dates arrive, so editors showing them can repaint. */
+  readonly onDidChangeSourceDates = this._onDidChangeSourceDates.event;
 
   private readonly repositoryTrust: RepositoryTrust;
   /** Local Change History's work items and checkpoints; the service delegates to it. */
@@ -140,7 +150,11 @@ export class CheckoutService implements vscode.Disposable {
       showError: (message) => void vscode.window.showErrorMessage(message),
     });
     this.baselines = new BaselineStore(
-      this.storageUri ? workspaceBaselineFiles(this.storageUri) : undefined,
+      this.storageUri ? workspaceFiles(this.storageUri, BASELINE_DIR) : undefined,
+      (message) => this.log.appendLine(message)
+    );
+    this.dates = new DateStore(
+      this.storageUri ? workspaceFiles(this.storageUri, DATES_DIR) : undefined,
       (message) => this.log.appendLine(message)
     );
     this.history = new WorkItemHistory({
@@ -209,6 +223,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   dispose(): void {
+    this._onDidChangeSourceDates.dispose();
     this.store.dispose();
     this._onDidChange.dispose();
   }
@@ -713,6 +728,7 @@ export class CheckoutService implements vscode.Disposable {
 
     const hash = hashContent(content);
     await this.setBaseline(entry, hash, content);
+    this.keepSourceDates(entry, hash);
 
     this.log.appendLine(
       `[checkout] ${library}/${sourceFile}/${memberName}  remoteHashAtCheckout=${hash.substring(0, 12)}`
@@ -797,6 +813,9 @@ export class CheckoutService implements vscode.Disposable {
     await this.adoptNextBaseline(entry, localHash, remoteHash, remoteContent);
     // A checkout made before baselines were kept gets its text from whichever side is still the base.
     await this.baselines.ensure(entry.remoteHashAtCheckout, [remoteContent, localContent]);
+    if (entry.remoteHashAtCheckout === remoteHash) {
+      this.keepSourceDates(entry, remoteHash);
+    }
     // Read again in case the source file changed; one query per source file per connection.
     await this.fillSourceLayout(entry, { replace: true });
 
@@ -926,7 +945,9 @@ export class CheckoutService implements vscode.Disposable {
       await this.setReadOnly(entry.localPath, true);
     }
 
-    await this.setBaseline(entry, hashContent(content), content);
+    const hash = hashContent(content);
+    await this.setBaseline(entry, hash, content);
+    this.keepSourceDates(entry, hash);
     delete entry.remoteSeen;
     entry.checkedOutAt = new Date().toISOString();
     entry.lastCheckedAt = entry.checkedOutAt;
@@ -1044,6 +1065,9 @@ export class CheckoutService implements vscode.Disposable {
 
     // Without a read-back the baseline is the local text, which was sent as it is.
     await this.setBaseline(entry, after.baseline, storedContent ?? localContent);
+    if (storedContent !== undefined) {
+      this.keepSourceDates(entry, after.baseline);
+    }
     // The upload changed the member's stamp; the next refresh compares it in full.
     delete entry.remoteSeen;
     entry.lastCheckedAt = new Date().toISOString();
@@ -1370,12 +1394,50 @@ export class CheckoutService implements vscode.Disposable {
     await this.pruneBaselines();
   }
 
-  /** Drops the baseline texts no checkout refers to any more. */
+  /** Drops the baseline texts, and their source dates, no checkout refers to any more. */
   private async pruneBaselines(): Promise<void> {
-    const deleted = await this.baselines.prune(referencedBaselineHashes(this.index));
+    const keep = referencedBaselineHashes(this.index);
+    const deleted = await this.baselines.prune(keep);
     if (deleted > 0) {
       this.log.appendLine(`[baseline] Removed ${deleted} baseline text(s) no checkout uses`);
     }
+    await this.dates.prune(keep);
+  }
+
+  /** How source dates are shown: the `sourceDates` setting, read from user settings only. */
+  sourceDatesMode(): SourceDatesMode {
+    const mode = vscode.workspace.getConfiguration("ibmi-member-workspace").inspect<string>("sourceDates")?.globalValue ?? "hover";
+    return mode === "off" || mode === "gutter" ? mode : "hover";
+  }
+
+  /** The source dates kept for the checkout's baseline text, one per line, or undefined when none are. */
+  sourceDatesFor(entry: CheckedOutMember): Promise<string[] | undefined> {
+    return this.dates.read(entry.remoteHashAtCheckout);
+  }
+
+  /**
+   * Reads the member's source dates from the IBM i for the text hashing to `hash`, in the
+   * background: one query per new baseline text, none when the setting is off or the dates are
+   * already kept. A failure is logged; the member just shows no dates.
+   */
+  private keepSourceDates(entry: Pick<CheckedOutMember, "library" | "sourceFile" | "memberName">, hash: string): void {
+    if (this.sourceDatesMode() === "off" || !this.storageUri) {
+      return;
+    }
+    const member = `${entry.library}/${entry.sourceFile}(${entry.memberName})`;
+    void (async () => {
+      try {
+        if (await this.dates.has(hash)) {
+          return;
+        }
+        const dates = await downloadSourceDates(entry.library, entry.sourceFile, entry.memberName);
+        if (await this.dates.write(hash, dates)) {
+          this._onDidChangeSourceDates.fire();
+        }
+      } catch (err) {
+        this.log.appendLine(`[dates] Could not read the source dates of ${member}: ${errorMessage(err)}`);
+      }
+    })();
   }
 
   /**
@@ -1559,9 +1621,9 @@ export function assertEditable(entry: CheckedOutMember): void {
   }
 }
 
-/** The baseline texts' files in the workspace's extension storage. */
-function workspaceBaselineFiles(folder: vscode.Uri): BaselineFiles {
-  const dir = vscode.Uri.joinPath(folder, BASELINE_DIR);
+/** The files of one directory (baseline texts, source dates) in the workspace's extension storage. */
+function workspaceFiles(folder: vscode.Uri, subdirectory: string): BaselineFiles {
+  const dir = vscode.Uri.joinPath(folder, subdirectory);
   const file = (name: string) => vscode.Uri.joinPath(dir, name);
   return {
     exists: async (name) => {

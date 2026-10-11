@@ -9,6 +9,7 @@ import { errorMessage } from "./errors";
 import { ProviderAvailabilityCache } from "./dependencySources";
 import { LocalFileWatcher } from "./localFileWatcher";
 import { REPORT_SCHEME, ReportProvider } from "./reportProvider";
+import { registerSourceDates } from "./sourceDatesEditor";
 import { registerSourceDiagnostics } from "./sourceDiagnostics";
 import { CheckoutDecorations } from "./checkoutDecorations";
 import { extractMemberInfo } from "./memberInfo";
@@ -247,6 +248,7 @@ export async function activate(
   registerResearchCommands(ctx);
   registerGitCommands(ctx);
   registerSourceDiagnostics(context, service);
+  registerSourceDates(context, service, log);
   registerBackgroundRefresh(ctx);
   registerConnectNotices(ctx);
 

@@ -211,6 +211,7 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
       const lines = Array.from({ length: 10 }, (_, i) => `${file.name} ${file.number} line ${i + 1}`);
       return { lines: lines.slice(startLine - 1, endLine), totalLines: lines.length };
     },
+    sourceDates: async () => undefined,
     ...overrides,
   };
   return { io, checkouts, brought };
@@ -603,5 +604,31 @@ describe("read_spool_file", () => {
     await assert.rejects(read.call({ name: "NOPE" }), /No spooled file named NOPE for the connected user/);
     await assert.rejects(read.call({}), /Give "name"/);
     await assert.rejects(read.call({ name: "ORD100", job: "bad" }), /"job" must be/);
+  });
+});
+
+describe("read_member_source with includeDates", () => {
+  it("gives each returned line its source date, null where the local text changed", async () => {
+    const baseline = ["**FREE", "/copy qcpysrc,protos", "dcl-proc main export;", "end-proc;"].join("\n");
+    const { io, checkouts } = fakeIo({
+      sourceDates: async () => ({ baseline, dates: ["140321", "0", "200102", "210304"] }),
+    });
+    checkouts.push(entry("PRODSRC", "QRPGLESRC", "ORDENT", "sqlrpgle", false));
+    const result = await tool(createResearchTools(io), "read_member_source").call({
+      library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", includeDates: true, startLine: 2, endLine: 5,
+    }) as { dates: Array<string | null>; datesNote?: string };
+    assert.deepEqual(result.dates, [null, "2020-01-02", "2021-03-04", null]);
+    assert.equal(result.datesNote, undefined);
+  });
+
+  it("says why there are no dates, and returns none unless asked", async () => {
+    const { io, checkouts } = fakeIo();
+    checkouts.push(entry("PRODSRC", "QRPGLESRC", "ORDENT", "sqlrpgle", false));
+    const tools = createResearchTools(io);
+    const plain = await tool(tools, "read_member_source").call({ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT" }) as Record<string, unknown>;
+    assert.equal("dates" in plain, false);
+    const asked = await tool(tools, "read_member_source").call({ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", includeDates: true }) as { dates?: unknown; datesNote: string };
+    assert.equal(asked.dates, undefined);
+    assert.match(asked.datesNote, /ibmi-member-workspace\.sourceDates/);
   });
 });

@@ -179,6 +179,12 @@
         "category": "IBM i Member Workspace"
       },
       {
+        "command": "ibmi-member-workspace.toggleSourceDates",
+        "title": "Toggle Source Dates in the Gutter",
+        "category": "IBM i Member Workspace",
+        "icon": "$(calendar)"
+      },
+      {
         "command": "ibmi-member-workspace.showDependencyDiagram",
         "title": "Show Dependency Diagram",
         "category": "IBM i Member Workspace",
@@ -584,6 +590,10 @@
           "when": "ibmi-member-workspace:checkoutActive"
         },
         {
+          "command": "ibmi-member-workspace.toggleSourceDates",
+          "when": "ibmi-member-workspace:checkoutActive"
+        },
+        {
           "command": "ibmi-member-workspace.showDependencyDiagram",
           "when": "ibmi-member-workspace:dependencyResultAvailable"
         },
@@ -836,6 +846,11 @@
           "command": "ibmi-member-workspace.revealInExplorer",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "1_open@3"
+        },
+        {
+          "command": "ibmi-member-workspace.toggleSourceDates",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
+          "group": "1_open@4"
         },
         {
           "command": "ibmi-member-workspace.mergeBack",
@@ -1225,6 +1240,11 @@
           "group": "3_open@1"
         },
         {
+          "command": "ibmi-member-workspace.toggleSourceDates",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "3_open@2"
+        },
+        {
           "command": "ibmi-member-workspace.findDependencies",
           "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
           "group": "4_deps@1"
@@ -1359,6 +1379,22 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically open the file in the editor after checkout."
+        },
+        "ibmi-member-workspace.sourceDates": {
+          "type": "string",
+          "scope": "application",
+          "enum": [
+            "off",
+            "hover",
+            "gutter"
+          ],
+          "enumDescriptions": [
+            "Don't read source dates from the IBM i.",
+            "Show the date a line was last changed on the IBM i when hovering over it.",
+            "Show the dates in the gutter of checked-out members too (Toggle Source Dates in the Gutter switches between hover and gutter)."
+          ],
+          "default": "hover",
+          "markdownDescription": "The IBM i's source dates (the date each line was last changed) on checked-out members. Reading them is one extra query per member downloaded, at checkout, Refresh and upload. Lines added or changed locally have no date until they are uploaded. Only user settings are read, so a workspace can't turn it on."
         },
         "ibmi-member-workspace.staleCheckoutDays": {
           "type": "integer",

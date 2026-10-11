@@ -105,6 +105,7 @@ describe("extension manifest", () => {
       "changeManagement.release",
       "changeManagement.checkinCommand",
       "researchTools.allowDataSamples",
+      "sourceDates",
     ]) {
       assert.equal(properties[`ibmi-member-workspace.${setting}`].scope, "application", setting);
     }
@@ -281,7 +282,7 @@ describe("extension manifest", () => {
     const writers = ["uploadToRemote", "mergeBack", "runAction", "checkinThroughChangeManagement"].map(command);
     const readers = [
       "refreshRemote", "openRemoteFile", "findDependencies", "findAllDependencies", "copyMemberPath", "revealInExplorer",
-      "compareWithRemote", "showChangesSinceCheckout",
+      "compareWithRemote", "showChangesSinceCheckout", "toggleSourceDates",
     ].map(command);
 
     // Editor title: upload, merge and refresh, in that order.

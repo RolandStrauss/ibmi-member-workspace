@@ -1114,6 +1114,30 @@ export async function sampleFileRows(
   return { library, systemName: file, sqlName: table.sqlName, ...(member ? { member } : {}), columns, rows: values, notes };
 }
 
+/**
+ * The source date (SRCDAT) of every line of a member, as `YYMMDD` strings ("0" for none), in
+ * sequence order, through an alias in QTEMP (shared with the outfile commands, so serialized).
+ * Code for IBM i's download gives the text only.
+ */
+export async function downloadSourceDates(library: string, sourceFile: string, member: string): Promise<string[]> {
+  const connection = requireConnection();
+  const lib = objectName(library, "library");
+  const file = objectName(sourceFile, "source file");
+  const mbr = objectName(member, "member");
+  return exclusive(async () => {
+    await connection.runSQL(`CREATE OR REPLACE ALIAS QTEMP.IMWDATES FOR "${lib}"."${file}"("${mbr}")`);
+    try {
+      const rows = await connection.runSQL("SELECT SRCDAT FROM QTEMP.IMWDATES ORDER BY SRCSEQ");
+      return rows.map((row) => {
+        const raw = Number(row.SRCDAT ?? 0);
+        return Number.isFinite(raw) && raw > 0 ? String(Math.floor(raw)).padStart(6, "0") : "0";
+      });
+    } finally {
+      await connection.runSQL("DROP ALIAS QTEMP.IMWDATES").catch(() => undefined);
+    }
+  });
+}
+
 export async function listSourceFileMembers(
   library: string,
   sourceFile: string

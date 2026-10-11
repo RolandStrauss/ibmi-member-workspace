@@ -243,6 +243,11 @@ function createTools(ctx: CommandContext, whereUsedSetting: string): McpTool[] {
     runQuery: runReadOnlyQuery,
     listSpooledFiles,
     readSpooledFile,
+    sourceDates: async (entry) => {
+      const dates = await service.sourceDatesFor(entry);
+      const baseline = dates && await service.baselineText(entry);
+      return dates && baseline !== undefined ? { baseline, dates } : undefined;
+    },
   });
 }
 
