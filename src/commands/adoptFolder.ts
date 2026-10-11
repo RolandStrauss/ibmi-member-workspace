@@ -38,9 +38,11 @@ async function adoptCheckoutFolder(ctx: CommandContext): Promise<void> {
   const tracked = new Set(service.getEntriesForSystem(system).map((entry) => entry.id));
   const scan = scanCheckoutFolder(root.fsPath, systemFolder, system, realFolder(), tracked);
   if (scan.candidates.length === 0) {
+    const skipped = scan.skipped > 0 ? ` ${scan.skipped} file(s) or link(s) not in the member layout (${systemFolder}/LIB/SRCFILE/MEMBER.EXT, upper case) were left out.` : "";
     vscode.window.showInformationMessage(
-      `Nothing to adopt: every member file under ${systemFolder} in the checkout folder is already tracked` +
-      (scan.skipped > 0 ? ` (${scan.skipped} file(s) or link(s) not in the member layout were skipped)` : "") + "."
+      tracked.size > 0
+        ? `Nothing to adopt: every member file under ${systemFolder} in the checkout folder is already tracked.${skipped}`
+        : `No member files found under ${systemFolder} in the checkout folder.${skipped}`
     );
     return;
   }
@@ -48,7 +50,7 @@ async function adoptCheckoutFolder(ctx: CommandContext): Promise<void> {
   const chosen = await vscode.window.showQuickPick(
     scan.candidates.map((candidate) => ({
       label: `${candidate.library}/${candidate.sourceFile}(${candidate.memberName})`,
-      description: candidate.readOnly ? "read-only → reference copy" : `.${candidate.extension}`,
+      description: candidate.readOnly ? `.${candidate.extension} · read-only, reference copy` : `.${candidate.extension}`,
       detail: candidate.localPath,
       picked: true,
       candidate,
@@ -56,7 +58,7 @@ async function adoptCheckoutFolder(ctx: CommandContext): Promise<void> {
     {
       canPickMany: true,
       title: `Adopt members already in the checkout folder of ${system}` + (scan.truncated ? ` (first ${MAX_ADOPT_CANDIDATES}; run again for the rest)` : ""),
-      placeHolder: "Each is compared with its copy on the IBM i; read-only files become reference copies. Files are not changed.",
+      placeHolder: "Members to track; the files aren't changed",
       matchOnDescription: true,
       matchOnDetail: true,
     }

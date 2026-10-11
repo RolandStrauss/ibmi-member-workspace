@@ -221,7 +221,8 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
     findFieldUsage: async (field, { libraries, memberLimit }) => ({
       field,
       columns: libraries.includes("PRODDTA") ? [{ library: "PRODDTA", file: "CUSTMAST", sqlName: "CUSTOMER_MASTER", column: "CUSTNO", systemColumn: "CUSTNO", type: "NUMERIC", length: "7", scale: "0", text: "Customer number" }] : [],
-      members: [{ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", sourceType: "SQLRPGLE", text: "Order entry", lastChanged: "" }].slice(0, memberLimit),
+      members: [{ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", extension: "sqlrpgle", lines: [{ number: 12, content: "dcl-s custno packed(7);" }], totalLines: 1 }].slice(0, memberLimit),
+      filesSearched: ["PRODSRC/QRPGLESRC"],
       notes: [],
     }),
     memberLocks: async (library, sourceFile, member) => ({

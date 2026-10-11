@@ -173,7 +173,7 @@ export function registerResearchCommands(ctx: CommandContext): void {
       }
       const field = await vscode.window.showInputBox({
         title: "Find Field Usage",
-        prompt: "The field (column) name, looked for in the dependency search libraries: files that define it, and members that mention it",
+        prompt: "A field (column) name, looked for in the dependency search libraries: the files that define it, and the source members whose lines contain it (not tied to the selected member)",
         value: vscode.window.activeTextEditor?.document.getText(vscode.window.activeTextEditor.selection).trim() || undefined,
         validateInput: (value) => (FIELD_NAME.test(value.trim()) ? undefined : "A field or column name (letters, digits, _ $ # @)"),
       });
@@ -196,7 +196,7 @@ export function registerResearchCommands(ctx: CommandContext): void {
     "ibmi-member-workspace.research.memberLocks",
     onMembers("Show Member Locks", "Member as LIBRARY/SOURCEFILE(MEMBER)", async (target, system) => {
       if (!target.library || !target.sourceFile) {
-        vscode.window.showWarningMessage(`Show Member Locks needs the member's library and source file: use it on a member, or type LIB/FILE(MBR).`);
+        vscode.window.showWarningMessage("Show Member Locks needs the member's library and source file: use it on a member, or type LIBRARY/SOURCEFILE(MEMBER).");
         return;
       }
       const locks = await withNotification(`Reading the locks on ${target.name}...`, () => memberLocks(target.library!, target.sourceFile!, target.name));
@@ -274,9 +274,9 @@ async function askForName(ctx: CommandContext, what: string, prompt: string): Pr
     title: what,
     prompt: wantsPath ? prompt : `${prompt} (looked for in the dependency search libraries)`,
     value: wantsPath && active ? `${active.library}/${active.sourceFile}(${active.memberName})` : active?.memberName,
-    validateInput: (value) => (OBJECT_NAME.test(value.trim()) || MEMBER_PATH.test(value.trim())
-      ? undefined
-      : wantsPath ? "LIBRARY/SOURCEFILE(MEMBER)" : "An IBM i object name of up to 10 characters"),
+    validateInput: (value) => (wantsPath
+      ? (MEMBER_PATH.test(value.trim()) ? undefined : "LIBRARY/SOURCEFILE(MEMBER)")
+      : (OBJECT_NAME.test(value.trim()) ? undefined : "An IBM i object name of up to 10 characters")),
   });
   if (!typed) {
     return [];

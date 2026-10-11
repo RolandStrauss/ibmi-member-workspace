@@ -125,7 +125,7 @@ describe("stale checkouts", () => {
     const b = member("LIB", "QRPGLESRC", "B", { checkedOutAt: "2026-08-01T00:00:00.000Z", status: "modified" });
     const fresh = member("LIB", "QRPGLESRC", "C", { checkedOutAt: "2026-10-09T00:00:00.000Z" });
     assert.deepEqual(staleEntries([a, fresh, b], stale).map((entry) => entry.memberName), ["B", "A"]);
-    assert.equal(memberDescription(a, false, format, stale), "in sync 2026-09-01 · 39 days");
+    assert.equal(memberDescription(a, false, format, stale), "in sync 2026-09-01 · out 39 days");
     assert.equal(memberDescription(fresh, false, format, stale), "in sync 2026-10-09");
     assert.match(memberTooltip(a, false, format, stale), /\*\*Checked out:\*\* 2026-09-01T00:00:00.000Z \(39 days ago\)/);
     assert.doesNotMatch(memberTooltip(fresh, false, format, stale), /days ago/);

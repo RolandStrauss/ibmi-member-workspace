@@ -40,8 +40,9 @@ export interface ScanResult {
 /** A folder of thousands of members is adopted in parts, so one quick pick stays usable. */
 export const MAX_ADOPT_CANDIDATES = 2000;
 
+/** The layout writes upper-case names; another case would be tracked under a path that isn't the file's on a case-sensitive file system. */
 function named(entry: FolderEntry, kind: FolderEntry["kind"]): boolean {
-  return entry.kind === kind && !entry.name.startsWith(".");
+  return entry.kind === kind && !entry.name.startsWith(".") && entry.name === entry.name.toUpperCase();
 }
 
 /**
@@ -59,21 +60,22 @@ export function scanCheckoutFolder(
   const systemRoot = path.join(root, systemFolder);
   const sorted = (entries: FolderEntry[]) => [...entries].sort((a, b) => a.name.localeCompare(b.name));
 
+  const counted = (entry: FolderEntry) => entry.kind === "link" || (entry.kind === "directory" && !entry.name.startsWith(".")) ? 1 : 0;
   for (const libraryEntry of sorted(io.list(systemRoot))) {
     if (!named(libraryEntry, "directory")) {
-      result.skipped += libraryEntry.kind === "link" ? 1 : 0;
+      result.skipped += counted(libraryEntry);
       continue;
     }
     const libraryDir = path.join(systemRoot, libraryEntry.name);
     for (const fileEntry of sorted(io.list(libraryDir))) {
       if (!named(fileEntry, "directory")) {
-        result.skipped += fileEntry.kind === "link" ? 1 : 0;
+        result.skipped += counted(fileEntry);
         continue;
       }
       const sourceDir = path.join(libraryDir, fileEntry.name);
       for (const memberEntry of sorted(io.list(sourceDir))) {
         if (!named(memberEntry, "file")) {
-          result.skipped += memberEntry.kind === "link" ? 1 : 0;
+          result.skipped += memberEntry.kind === "link" || (memberEntry.kind === "file" && !memberEntry.name.startsWith(".")) ? 1 : 0;
           continue;
         }
         const dot = memberEntry.name.lastIndexOf(".");

@@ -35,6 +35,8 @@ describe("the checks", () => {
     assert.equal(memberTextProblem("x".repeat(50)), undefined);
     assert.equal(memberTextProblem("x".repeat(51)), "The text is 51 characters; the IBM i keeps 50.");
     assert.equal(memberTextProblem("line\nbreak"), "The text can't contain control characters.");
+    assert.equal(memberTextProblem('say "hi"'), "The text can't contain \", `, $ or \\.");
+    assert.equal(memberTextProblem("Bob's $ orders"), "The text can't contain \", `, $ or \\.");
   });
 
   it("refuse names that aren't IBM i names, so nothing odd reaches a CL command", () => {

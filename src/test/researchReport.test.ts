@@ -143,14 +143,15 @@ describe("fieldUsageReport", () => {
     const report = fieldUsageReport({
       field: "CUSTNO",
       columns: [{ library: "PRODDTA", file: "CUSTMAST", sqlName: "CUSTOMER_MASTER", column: "CUSTNO", systemColumn: "CUSTNO", type: "NUMERIC", length: "7", scale: "0", text: "Customer number" }],
-      members: [{ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", sourceType: "SQLRPGLE", text: "Order entry", lastChanged: "" }],
+      members: [{ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", extension: "sqlrpgle", lines: [{ number: 12, content: "dcl-s custno packed(7);" }], totalLines: 3 }],
+      filesSearched: ["PRODSRC/QRPGLESRC"],
       notes: ["text search"],
     }, "SYS", ["PRODDTA", "PRODSRC"]);
     assert.match(report, /^Field CUSTNO on SYS\nLibraries searched: PRODDTA, PRODSRC\n/);
     assert.match(report, /Defined in 1 file\(s\):/);
     assert.match(report, /CUSTOMER_MASTER/);
-    assert.match(report, /Mentioned in 1 source member\(s\):/);
+    assert.match(report, /Mentioned in 1 source member\(s\) \(searched PRODSRC\/QRPGLESRC\):\n\nPRODSRC\/QRPGLESRC\(ORDENT\) SQLRPGLE: 3 line\(s\)\n {6}12 {2}dcl-s custno packed\(7\);\n {2}… 2 more/);
     assert.match(report, /Note: text search/);
-    assert.match(fieldUsageReport({ field: "X", columns: [], members: [], notes: [] }, "SYS", []), /No file or table[\s\S]*No source member/);
+    assert.match(fieldUsageReport({ field: "X", columns: [], members: [], filesSearched: [], notes: [] }, "SYS", []), /No file or table[\s\S]*No source member/);
   });
 });

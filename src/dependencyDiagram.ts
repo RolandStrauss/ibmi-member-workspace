@@ -83,8 +83,14 @@ export function dependencyTreeText(root: DependencySubject, result: WalkResult):
   return lines.join("\n");
 }
 
-function mermaidLabel(text: string): string {
-  return `"${text.replace(/"/g, "#quot;")}"`;
+/** A quoted Mermaid label of several lines; member text is data, so its markup characters are escaped as entities. */
+function mermaidLabel(...parts: string[]): string {
+  const escaped = parts.map((part) => part
+    .replace(/#/g, "#35;")
+    .replace(/"/g, "#quot;")
+    .replace(/</g, "#lt;")
+    .replace(/>/g, "#gt;"));
+  return `"${escaped.join("<br/>")}"`;
 }
 
 /** The walk as a Mermaid `graph LR`; members whose source wasn't found are dashed. */
@@ -114,7 +120,7 @@ export function dependencyMermaid(root: DependencySubject, result: WalkResult): 
     const id = idOf(subject);
     if (!declared.has(id)) {
       declared.add(id);
-      lines.push(`  ${id}[${mermaidLabel(`${subject.memberName}\n${subject.library}/${subject.sourceFile}`)}]`);
+      lines.push(`  ${id}[${mermaidLabel(subject.memberName, `${subject.library}/${subject.sourceFile}`)}]`);
     }
   };
   declare(root);
@@ -130,7 +136,7 @@ export function dependencyMermaid(root: DependencySubject, result: WalkResult): 
   let unresolved = 0;
   for (const item of [...result.unresolved].sort(byKindThenName)) {
     const id = `u${unresolved++}`;
-    lines.push(`  ${id}[${mermaidLabel(`${item.reference.member}\nsource not found`)}]:::unresolved`);
+    lines.push(`  ${id}[${mermaidLabel(item.reference.member, "source not found")}]:::unresolved`);
     lines.push(`  ${idOf(parentSubject(item.via))} -. ${KIND_LABELS[item.reference.kind]} .-> ${id}`);
   }
   if (unresolved > 0) {
@@ -154,7 +160,7 @@ export function dependencyMarkdown(
   const lines = [
     `# Dependencies of ${subjectKey(root)}`,
     "",
-    `${counts.join("; ")}. Arrows point from a member to what it uses; dashed arrows lead to members whose source wasn't found.`,
+    `${counts.join("; ")}. Arrows point from a member to what it uses${result.unresolved.length > 0 ? "; dashed arrows lead to members whose source wasn't found" : ""}.`,
     "",
   ];
   if (!options.mermaidSupported) {

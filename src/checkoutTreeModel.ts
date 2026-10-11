@@ -110,7 +110,7 @@ export function memberDescription(entry: CheckedOutMember, localMissing: boolean
     return "local file missing — Refresh to re-checkout or remove";
   }
   const status = isReferenceCopy(entry) ? `reference · ${statusDescription(entry, format)}` : statusDescription(entry, format);
-  return stale && isStale(entry, stale) ? `${status} · ${checkoutAgeDays(entry, stale.now)} days` : status;
+  return stale && isStale(entry, stale) ? `${status} · out ${checkoutAgeDays(entry, stale.now)} days` : status;
 }
 
 /** A member's tooltip, as Markdown. */

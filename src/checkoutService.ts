@@ -40,6 +40,7 @@ import {
   normalizeForMemberUpload,
   statusAfterLocalSave,
   statusAfterUpload,
+  canonicalMemberText,
 } from "./sync";
 import { BASELINE_DIR, BaselineFiles, BaselineStore, referencedBaselineHashes } from "./baselineStore";
 import { DATES_DIR, DateStore } from "./dateStore";
@@ -739,7 +740,7 @@ export class CheckoutService implements vscode.Disposable {
 
     const hash = hashContent(content);
     await this.setBaseline(entry, hash, content);
-    this.keepSourceDates(entry, hash);
+    this.keepSourceDates(entry, hash, content);
 
     this.log.appendLine(
       `[checkout] ${library}/${sourceFile}/${memberName}  remoteHashAtCheckout=${hash.substring(0, 12)}`
@@ -825,7 +826,7 @@ export class CheckoutService implements vscode.Disposable {
     // A checkout made before baselines were kept gets its text from whichever side is still the base.
     await this.baselines.ensure(entry.remoteHashAtCheckout, [remoteContent, localContent]);
     if (entry.remoteHashAtCheckout === remoteHash) {
-      this.keepSourceDates(entry, remoteHash);
+      this.keepSourceDates(entry, remoteHash, remoteContent);
     }
     // Read again in case the source file changed; one query per source file per connection.
     await this.fillSourceLayout(entry, { replace: true });
@@ -1008,7 +1009,7 @@ export class CheckoutService implements vscode.Disposable {
     } else {
       const remoteHash = hashContent(remoteContent);
       await this.setBaseline(entry, remoteHash, remoteContent);
-      this.keepSourceDates(entry, remoteHash);
+      this.keepSourceDates(entry, remoteHash, remoteContent);
       entry.status = classifyStatus(localHash, remoteHash, remoteHash);
     }
     this.log.appendLine(`[adopt] ${formatMemberPath(entry)} from ${localPath}: ${entry.status}`);
@@ -1048,7 +1049,7 @@ export class CheckoutService implements vscode.Disposable {
 
     const hash = hashContent(content);
     await this.setBaseline(entry, hash, content);
-    this.keepSourceDates(entry, hash);
+    this.keepSourceDates(entry, hash, content);
     delete entry.remoteSeen;
     entry.checkedOutAt = new Date().toISOString();
     entry.lastCheckedAt = entry.checkedOutAt;
@@ -1167,7 +1168,7 @@ export class CheckoutService implements vscode.Disposable {
     // Without a read-back the baseline is the local text, which was sent as it is.
     await this.setBaseline(entry, after.baseline, storedContent ?? localContent);
     if (storedContent !== undefined) {
-      this.keepSourceDates(entry, after.baseline);
+      this.keepSourceDates(entry, after.baseline, storedContent);
     }
     // The upload changed the member's stamp; the next refresh compares it in full.
     delete entry.remoteSeen;
@@ -1521,17 +1522,25 @@ export class CheckoutService implements vscode.Disposable {
    * background: one query per new baseline text, none when the setting is off or the dates are
    * already kept. A failure is logged; the member just shows no dates.
    */
-  private keepSourceDates(entry: Pick<CheckedOutMember, "library" | "sourceFile" | "memberName">, hash: string): void {
+  private keepSourceDates(entry: Pick<CheckedOutMember, "library" | "sourceFile" | "memberName">, hash: string, text: string): void {
     if (this.sourceDatesMode() === "off" || !this.storageUri) {
       return;
     }
     const member = `${entry.library}/${entry.sourceFile}(${entry.memberName})`;
+    // The dates are read after the text: a member changed in between would give dates for another
+    // text. Fewer dates than the text has lines can't be its dates (more can: trailing blank records).
+    const canonical = canonicalMemberText(text);
+    const lines = canonical === "" ? 0 : canonical.split("\n").length;
     void (async () => {
       try {
         if (await this.dates.has(hash)) {
           return;
         }
         const dates = await downloadSourceDates(entry.library, entry.sourceFile, entry.memberName);
+        if (dates.length < lines) {
+          this.log.appendLine(`[dates] ${member} changed while its source dates were read (${dates.length} dates for ${lines} lines); they are not kept`);
+          return;
+        }
         if (await this.dates.write(hash, dates)) {
           this._onDidChangeSourceDates.fire();
         }

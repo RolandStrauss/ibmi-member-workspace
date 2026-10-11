@@ -31,6 +31,10 @@ export function memberTextProblem(text: string): string | undefined {
   if (/[\u0000-\u001f\u007f]/.test(text)) {
     return "The text can't contain control characters.";
   }
+  // The command travels through Code for IBM i to a PASE shell; these have meanings there.
+  if (/["`$\\]/.test(text)) {
+    return "The text can't contain \", `, $ or \\.";
+  }
   return undefined;
 }
 

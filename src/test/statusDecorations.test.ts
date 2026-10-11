@@ -55,18 +55,20 @@ describe("browserDecorationFor", () => {
       tooltip: "Checked out here (work item TICKET-42): in sync with your local copy.",
       colorId: undefined,
     });
+    assert.equal(browserDecorationFor({ status: "in-sync" }, "workspace").tooltip, "Checked out here: in sync with your local copy.");
   });
 
   it("keeps the status badge and color for a member with local changes", () => {
     const decoration = browserDecorationFor({ status: "modified" }, "workspace");
     assert.equal(decoration.badge, "↑");
     assert.equal(decoration.colorId, "gitDecoration.modifiedResourceForeground");
-    assert.equal(decoration.tooltip, "Checked out here (work item workspace): local changes not yet uploaded");
+    assert.equal(decoration.tooltip, "Checked out here: local changes not yet uploaded.");
   });
 
   it("says a reference copy is a reference copy", () => {
-    const decoration = browserDecorationFor({ status: "in-sync", kind: "reference" }, "workspace");
+    const decoration = browserDecorationFor({ status: "in-sync", kind: "reference" }, "TICKET-42");
     assert.equal(decoration.badge, "RO");
-    assert.match(decoration.tooltip, /^Reference copy here \(work item workspace\): read-only reference copy$/);
+    assert.equal(decoration.tooltip, "Reference copy here (work item TICKET-42).");
+    assert.match(browserDecorationFor({ status: "remote-changed", kind: "reference" }, "workspace").tooltip, /^Reference copy here: read-only reference copy, changed on the IBM i\./);
   });
 });

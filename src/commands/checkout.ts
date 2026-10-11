@@ -417,7 +417,10 @@ function noticeMemberLocks(ctx: CommandContext, entry: CheckedOutMember): void {
       if (others.length === 0) {
         return;
       }
-      const choice = await vscode.window.showWarningMessage(`${formatMemberPath(entry)}: ${summarizeLocks(others)}`, "Show Locks");
+      const choice = await vscode.window.showWarningMessage(
+        `${formatMemberPath(entry)}: ${summarizeLocks(others)} An upload would fail, or overwrite what they are editing; ask them to close it first.`,
+        "Show Locks"
+      );
       if (choice === "Show Locks") {
         await vscode.commands.executeCommand("ibmi-member-workspace.research.memberLocks", { kind: "member", entry });
       }

@@ -22,27 +22,36 @@ export function registerConnectNotices(ctx: CommandContext): void {
   const reminded = new Set<string>();
 
   const onConnected = async (system: string): Promise<void> => {
-    if (reminded.has(system) || getSystemName() !== system) {
+    if (getSystemName() !== system) {
+      return;
+    }
+    const entries = service.getEntriesForSystem(system);
+    // Unsent changes first, on every connect; the notices don't wait for each other (one left in the
+    // notification center would otherwise hold the next back).
+    const unsent = await withLocalChanges(unsentChanges(entries));
+    if (unsent.length > 0) {
+      void vscode.window.showInformationMessage(reconnectedMessage(system, unsent), "Upload All…", "Show").then(async (choice) => {
+        if (choice === "Upload All…") {
+          const items = unsent.map((entry) => ({ kind: "member" as const, entry }));
+          await vscode.commands.executeCommand("ibmi-member-workspace.uploadToRemote", items[0], items);
+        } else if (choice === "Show") {
+          await reveal(ctx, unsent[0]);
+        }
+      }, (err) => log.appendLine(`[notice] ${errorMessage(err)}`));
+    }
+    if (reminded.has(system)) {
       return;
     }
     reminded.add(system);
-    const entries = service.getEntriesForSystem(system);
     const stale = staleEntries(entries, { now: new Date(), thresholdDays: staleThreshold() });
     if (stale.length > 0) {
-      const choice = await vscode.window.showWarningMessage(staleMessage(stale, staleThreshold()), "Show");
-      if (choice === "Show") {
-        await reveal(ctx, stale[0]);
-      }
-    }
-    const unsent = await withLocalChanges(unsentChanges(entries));
-    if (unsent.length > 0) {
-      const choice = await vscode.window.showInformationMessage(reconnectedMessage(system, unsent), "Upload All…", "Show");
-      if (choice === "Upload All…") {
-        const items = unsent.map((entry) => ({ kind: "member" as const, entry }));
-        await vscode.commands.executeCommand("ibmi-member-workspace.uploadToRemote", items[0], items);
-      } else if (choice === "Show") {
-        await reveal(ctx, unsent[0]);
-      }
+      void vscode.window.showWarningMessage(staleMessage(stale, staleThreshold()), "Show", "Open Setting").then(async (choice) => {
+        if (choice === "Show") {
+          await reveal(ctx, stale[0]);
+        } else if (choice === "Open Setting") {
+          await vscode.commands.executeCommand("workbench.action.openSettings", `ibmi-member-workspace.${STALE_SETTING}`);
+        }
+      }, (err) => log.appendLine(`[notice] ${errorMessage(err)}`));
     }
   };
 
@@ -68,8 +77,10 @@ export function registerConnectNotices(ctx: CommandContext): void {
     return kept;
   };
 
+  let timer: NodeJS.Timeout | undefined;
   const schedule = (system: string) => {
-    setTimeout(() => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
       onConnected(system).catch((err) => log.appendLine(`[notice] On connect: ${errorMessage(err)}`));
     }, CONNECT_DELAY_MS);
   };
@@ -95,6 +106,7 @@ export function registerConnectNotices(ctx: CommandContext): void {
   }
 
   context.subscriptions.push(
+    { dispose: () => clearTimeout(timer) },
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration(`ibmi-member-workspace.${STALE_SETTING}`)) {
         treeProvider.refresh();

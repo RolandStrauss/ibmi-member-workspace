@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { ensureCheckoutFolder } from "../checkoutFolder";
 import { getSystemName } from "../codeForIBMi";
 import { errorMessage } from "../errors";
+import { isDefaultWorkItem } from "../types";
 import { exportFileName, exportWorkItem, importPlan, parseWorkItemExport } from "../workItemExport";
 import { checkoutMembersBatch } from "./checkout";
 import { CommandContext } from "./context";
@@ -32,8 +33,9 @@ async function exportCurrentWorkItem(ctx: CommandContext): Promise<void> {
   }
   const entries = service.getEntriesForSystem(system);
   const workItem = service.getActiveWorkItem(system);
+  const what = isDefaultWorkItem(workItem) ? `your checkouts on ${system}` : `work item ${workItem} on ${system}`;
   if (entries.length === 0) {
-    vscode.window.showInformationMessage(`Work item ${workItem} on ${system} has no checked-out members to export.`);
+    vscode.window.showInformationMessage(`${what[0].toUpperCase()}${what.slice(1)} ${isDefaultWorkItem(workItem) ? "have" : "has"} no checked-out members to export.`);
     return;
   }
   const target = await vscode.window.showSaveDialog({
@@ -48,7 +50,7 @@ async function exportCurrentWorkItem(ctx: CommandContext): Promise<void> {
   try {
     const file = exportWorkItem(system, workItem, entries);
     await vscode.workspace.fs.writeFile(target, Buffer.from(JSON.stringify(file, null, 2), "utf-8"));
-    vscode.window.showInformationMessage(`Exported ${entries.length} member(s) of work item ${workItem} to ${target.fsPath}.`);
+    vscode.window.showInformationMessage(`Exported ${entries.length} member(s) of ${what} to ${target.fsPath}.`);
   } catch (err) {
     vscode.window.showErrorMessage(`Could not export the work item: ${errorMessage(err)}`);
   }
@@ -93,8 +95,14 @@ async function importWorkItemFile(ctx: CommandContext): Promise<void> {
     return;
   }
   const total = plan.editable.length + plan.reference.length;
+  if (total === 0) {
+    vscode.window.showInformationMessage(`${source.fsPath} lists no members.`);
+    return;
+  }
+  const into = isDefaultWorkItem(service.getActiveWorkItem(system)) ? "your checkouts" : `work item ${service.getActiveWorkItem(system)}`;
+  const fromWhat = isDefaultWorkItem(parsed.value.workItem) ? `the checkouts exported from ${parsed.value.system}` : `work item ${parsed.value.workItem} (exported from ${parsed.value.system})`;
   const choice = await vscode.window.showInformationMessage(
-    `Check out the ${total} member(s) of work item ${parsed.value.workItem} (exported from ${parsed.value.system}) into work item ${service.getActiveWorkItem(system)}?`,
+    `Check out the ${total} member(s) of ${fromWhat} into ${into}?`,
     {
       modal: true,
       detail: `${plan.editable.length} for change and ${plan.reference.length} as read-only reference copies. ` +

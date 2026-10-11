@@ -117,7 +117,7 @@ Refreshing a source file group or every checkout is quick: one query per source 
 
 A badge on the Member Workspace icon shows how many members changed on the IBM i, with or without local changes, and how many were deleted there, as of their last refresh.
 
-Members checked out for change for a long time show their age in Checked Out Members (for example *in sync 2026-09-01 · 39 days*), and a notice after connecting lists them, with **Show**. The reminder starts at `ibmi-member-workspace.staleCheckoutDays` days (14 by default; 0 turns it off). Reference copies are never counted.
+Members checked out for change for a long time show their age in Checked Out Members (for example *in sync 2026-09-01 · out 39 days*), and a notice after connecting lists them, with **Show**. The reminder starts at `ibmi-member-workspace.staleCheckoutDays` days (14 by default; 0 turns it off). Reference copies are never counted.
 
 When a checked-out member no longer exists on the IBM i, Refresh marks it **deleted on IBM i** instead of reporting an error each time, and leaves your local file as it is. The message offers **Remove from Checkouts** (the file stays on disk) or **Keep**. Upload, Merge Back and Run Action aren't offered for such a member; an upload or re-checkout that finds the member gone says so. If the member comes back, the next Refresh shows its usual status again. A member that can't be downloaded for another reason (a busy or dropped connection) is reported as an error, not as deleted: the IBM i's catalog decides.
 
@@ -359,13 +359,13 @@ In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research
 | `bring_reference_copies` | Brings members to read |
 | `list_checkouts` | What's in the checkout folder, and which files are reference copies |
 | `compare_checkout` | How a checked-out member differs from its copy on the IBM i, as a line-by-line diff, with its sync status |
-| `describe_object` | A program or service program: ILE or OPM, text, owner, when it was created and last used, the source it was compiled from, activation group, adopted authority, entry module, and the modules and service programs bound into it. With `objectType` `*CMD`, `*DTAARA`, `*DTAQ` or `*JOBD`: a command, data area, data queue or job description, with the columns of its QSYS2 view (a data area's value only while `allowDataSamples` is on) |
+| `describe_object` | A program or service program: ILE or OPM, text, owner, when it was created and last used, the source it was compiled from, activation group, adopted authority, entry module, and the modules and service programs bound into it. With `objectType` `*CMD`, `*DTAARA`, `*DTAQ` or `*JOBD`: a command, data area, data queue or job description, with the columns of its QSYS2 view (a data area's value, and a job description's request data, only while `allowDataSamples` is on) |
 | `read_job_log` | The recent messages of the job the extension runs commands in (where a failed command or compile left its messages), or of a job you name |
 | `sample_file_data` | The first rows of a file or table (10 by default, at most 100), only while `ibmi-member-workspace.researchTools.allowDataSamples` is on |
 | `sql_query` | The rows of one read-only SQL statement (SELECT, WITH or VALUES; 50 by default, at most 500), only while `ibmi-member-workspace.researchTools.allowDataSamples` is on. Anything that changes data or objects, CALL, SET, and functions that run commands or reach other systems are refused |
 | `read_spool_file` | The lines of a spooled file, by default the newest one of that name for your user profile (a compile listing is named after its program), or a listing of the matching spooled files |
 | `list_objects` | What a library holds: each object's name, type, attribute, text, size, when it was last changed and used, and its source member; narrowed by object types or a generic name, at most 500 |
-| `find_field_usage` | Where a field is defined (files and tables with a column of that name, with its type and text) and which source members mention it |
+| `find_field_usage` | Where a field is defined (files and tables with a column of that name, with its type and text) and which source members use it, with the matching lines (a text search of at most 25 source files) |
 | `list_member_locks` | Which jobs have a member open (SEU, PDM, another editor), with each lock's state and status |
 
 All of them are read-only. `sample_file_data` and `sql_query` (and a data area's value in `describe_object`) are the tools that return data rather than metadata or source: rows can hold customers, prices or personal data, so they stay off until you turn on `ibmi-member-workspace.researchTools.allowDataSamples` in your user settings (one setting for Bob and the other agents). Until then they tell the agent which setting to ask you for. `sql_query` checks the statement before running it (one SELECT, WITH or VALUES, no second statement, no INSERT, UPDATE, DELETE, MERGE, CREATE, DROP, CALL, SET, QCMDEXC, HTTP functions and the like) and adds a row limit; a user-defined function does whatever its author wrote, so the setting, not the check, is what allows the tool.
@@ -448,7 +448,7 @@ The questions the AI research tools answer are on the menus for you too. Right-c
 - **Describe Program…** — a program's or service program's attributes: ILE or OPM, text, owner, when it was created and last used, the source it was compiled from, activation group, adopted authority, and the modules and service programs bound into it.
 - **Service Program Exports…** — the procedures and data a service program exports.
 - **Show Job Log…** — the recent messages of the job this connection runs commands in (where a failed command or compile left its messages), or of any job you name.
-- **Find Field Usage…** — where a field is defined (the files and tables with a column of that system or SQL name, with its type and text) and which source members mention it, found by a text search, so longer names containing it count too. The selected text in the editor is suggested.
+- **Find Field Usage…** — where a field is defined (the files and tables with a column of that system or SQL name, with its type and text) and which source members use it: a text search of the search libraries' source files (at most 25 of them, through Code for IBM i's member search), listing the matching lines with their numbers. Longer names containing the field count too. The selected text in the editor is suggested.
 - **Show Member Locks…** — which jobs have a member open (in SEU, PDM, RDi or another editor), with each lock's state and status, from `QSYS2.OBJECT_LOCK_INFO`; this connection's own job is marked. After a single-member checkout, a notice says when another job has the member open, since an upload would then fail or overwrite what that person is editing. From the Command Palette, type `LIBRARY/SOURCEFILE(MEMBER)`.
 
 ### Compare With
@@ -476,13 +476,13 @@ With a checked-out member open, you don't need the side bar:
 - **Editor title buttons** — **Upload to IBM i**, **Merge Back to IBM i** and **Refresh Remote Status** are at the top right of the editor. A read-only reference copy shows only Refresh.
 - **Right-click menu** — the **IBM i Member** submenu in the editor and in VS Code's Explorer has Upload, Merge Back, Refresh, Run Action, Compile on IBM i, Check In Through Change Management, Open Remote File, Toggle Source Dates in the Gutter, Find Dependencies, Find All Dependencies, Show Dependency Diagram, Compare with IBM i, Show Changes Since Checkout, Compare With, Research on IBM i, Copy Member Path, Reveal in File Explorer and Copy Member As. **Bob, Investigate** and **Investigate with AI** are next to it, as before in the Explorer.
 - **Command Palette** — the same commands are listed under **IBM i Member Workspace** while a checked-out member is the active editor.
-- **Keyboard** — `Ctrl+Alt+U` (`Cmd+Alt+U` on macOS) uploads the open member, `Ctrl+Alt+M` opens Merge Back, `Ctrl+Alt+R` refreshes its remote status, `Ctrl+Alt+B` compiles it on the IBM i and `Ctrl+Alt+K` checks it in through change management. Change them under **Keyboard Shortcuts** like any other.
+- **Keyboard** — `Ctrl+Alt+U` (`Cmd+Alt+U` on macOS) uploads the open member, `Ctrl+Alt+M` opens Merge Back, `Ctrl+Alt+R` refreshes its remote status, `Ctrl+Shift+Alt+B` compiles it on the IBM i and `Ctrl+Alt+K` checks it in through change management. Change them under **Keyboard Shortcuts** like any other.
 
 Actions that write to the IBM i (Upload, Merge Back, Run Action, Compile, Check In) aren't offered for reference copies or for members deleted on the IBM i.
 
 #### Compile on IBM i
 
-**Run Action** runs Code for IBM i's *local* actions on the local file. **Compile on IBM i…** (`Ctrl+Alt+B`) instead runs one of Code for IBM i's *member* actions on the member's copy on the IBM i, and brings the result back to your local file:
+**Run Action** runs Code for IBM i's *local* actions on the local file. **Compile on IBM i…** (`Ctrl+Shift+Alt+B`, `Cmd+Shift+Alt+B` on macOS) instead runs one of Code for IBM i's *member* actions on the member's copy on the IBM i, and brings the result back to your local file:
 
 1. If the local file has changes not yet uploaded, you're asked to **Upload and Compile** (the usual upload, with its checks) or to compile the IBM i's copy as it is.
 2. Code for IBM i's action picker opens, as it does for a member in its Object Browser; choose the compile.
@@ -492,7 +492,7 @@ The messages stay until the next compile of the member or until you close the fi
 
 #### Source Dates
 
-Every line of a source member has a date on the IBM i: when it was last changed. Code for IBM i shows them in its editor; from this version, checked-out members keep them locally too. Hover over a line to see **Last changed on the IBM i: 2014-03-21**. **Toggle Source Dates in the Gutter** (the IBM i Member submenu, the member's right-click menu, or the Command Palette) shows the dates next to every line instead, like SEU; the same command switches back.
+Every line of a source member has a date on the IBM i: when it was last changed. Code for IBM i shows them in its editor; from this version, checked-out members keep them locally too. Hover over a line to see **Last changed on the IBM i: 2014-03-21**. **Toggle Source Dates in the Gutter** (the IBM i Member submenu, the member's right-click menu, or the Command Palette) shows the dates next to every line instead, like SEU; the same command switches back. The dates are drawn in front of the text, so column rulers you set for fixed-form source sit 11 characters further right while they are shown.
 
 The dates belong to the member as it was when it was checked out, refreshed or uploaded, and are read with one extra query each time that text is downloaded. Lines you add or change locally have no date until they are uploaded (with **Enable source dates** on in Code for IBM i, the upload dates them). A member's dates are mapped onto your edited text through the lines that didn't change, so inserting or deleting lines above doesn't shift them. The `ibmi-member-workspace.sourceDates` setting (user settings only) is `hover` by default; `gutter` shows them in the gutter from the start, and `off` reads no dates at all. Members checked out before this version get their dates at their next Refresh, upload or re-checkout. The AI research tools' `read_member_source` returns the same dates with `includeDates`, so an agent can tell decades-old logic from last week's change.
 
@@ -550,7 +550,7 @@ Settings marked *User settings only* are read from your user settings alone, so 
 | `ibmi-member-workspace.bob.whereUsedMaxLibraries` | `10` | **IBM Bob only.** How many search libraries `find_where_used` reads when Bob names none, from 1 to 25. |
 | `ibmi-member-workspace.agents.researchTools` | `true` | Let Claude Code, Codex (VS Code and IBM Bob) or GitHub Copilot (VS Code) use the IBM i research tools once you connect them. User settings only. See **Using with Claude Code, Codex and GitHub Copilot**. |
 | `ibmi-member-workspace.agents.whereUsedMaxLibraries` | `10` | **Claude Code, Codex and GitHub Copilot.** How many search libraries `find_where_used` reads when the agent names none, from 1 to 25. |
-| `ibmi-member-workspace.researchTools.allowDataSamples` | `false` | Let the research tools return business data to Bob's agent, Claude Code, Codex or GitHub Copilot: `sample_file_data` (the first rows of a file or table, at most 100), `sql_query` (one read-only SELECT) and a data area's value in `describe_object`. The other tools return only metadata and source. User settings only. |
+| `ibmi-member-workspace.researchTools.allowDataSamples` | `false` | Let the research tools return business data to IBM Bob's agent, Claude Code, Codex or GitHub Copilot: `sample_file_data` (the first rows of a file or table, at most 100), `sql_query` (the rows of one read-only SELECT), a data area's value and a job description's request data in `describe_object`. The other research tools return only metadata and source. User settings only. |
 
 ### Local Change History
 

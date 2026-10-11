@@ -29,6 +29,10 @@ export function registerMemberCreateCommands(ctx: CommandContext): void {
         vscode.window.showInformationMessage("Select a checked-out member to copy, or open its local file.");
         return;
       }
+      if (entry.status === "remote-missing") {
+        vscode.window.showWarningMessage(`${formatMemberPath(entry)} no longer exists on the IBM i, so there is nothing to copy there.`);
+        return;
+      }
       await createMember(ctx, { from: entry });
     })
   );
@@ -67,9 +71,14 @@ async function createMember(ctx: CommandContext, source: { from?: CheckedOutMemb
   }
 
   const commands = from ? copyMemberPlan(from, spec) : [addMemberCommand(spec)];
+  const localChanges = from && await ctx.service.hasLocalChanges(from).catch(() => false);
   const choice = await vscode.window.showWarningMessage(
     `Run ${commands.length === 1 ? "this command" : `these ${commands.length} commands`} on ${system}?`,
-    { modal: true, detail: commands.join("\n") },
+    {
+      modal: true,
+      detail: commands.join("\n") +
+        (localChanges ? `\n\nThe copy is made from ${formatMemberPath(from)} as it is on the IBM i: your local changes, not yet uploaded, aren't in it.` : ""),
+    },
     "Run"
   );
   if (choice !== "Run" || !(await ensureWorkItemForCheckout(ctx, system))) {
@@ -123,8 +132,9 @@ async function checkTarget(spec: NewMemberSpec): Promise<string | undefined> {
 
 /** Asks for the library, source file, member, source type and text, in that order; undefined when dismissed. */
 async function askForMember(what: string, from: MemberRef & { extension: string } | undefined, prefill: SourceFileInfo | undefined): Promise<NewMemberSpec | undefined> {
+  let step = 0;
   const ask = (prompt: string, value: string, validate: (value: string) => string | undefined) =>
-    vscode.window.showInputBox({ title: what, prompt, value, ignoreFocusOut: true, validateInput: (typed) => validate(typed.trim()) });
+    vscode.window.showInputBox({ title: `${what} (${++step}/5)`, prompt, value, ignoreFocusOut: true, validateInput: (typed) => validate(typed.trim()) });
   const name = (label: string) => (value: string) => (IBMI_NAME.test(value) ? undefined : `Enter an IBM i ${label} name of up to 10 characters.`);
 
   const library = await ask("Library the member is added in", from?.library ?? prefill?.library ?? "", name("library"));
@@ -148,7 +158,7 @@ async function askForMember(what: string, from: MemberRef & { extension: string 
     return undefined;
   }
   const text = await vscode.window.showInputBox({
-    title: what,
+    title: `${what} (5/5)`,
     prompt: "Member text (description), up to 50 characters; leave empty for none",
     value: "",
     ignoreFocusOut: true,

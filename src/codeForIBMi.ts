@@ -894,6 +894,8 @@ export const DESCRIBABLE_TYPES = ["*PGM", "*SRVPGM", "*CMD", "*DTAARA", "*DTAQ",
 
 /** Columns of a data area's row that hold its value, withheld unless the user allows data samples. */
 const DATA_AREA_VALUE_COLUMNS = /VALUE/;
+/** Columns of a job description that can carry a command line with a password (RQSDTA), withheld the same way. */
+const JOB_DESCRIPTION_DATA_COLUMNS = /REQUEST_DATA|ROUTING_DATA/;
 
 /** Every present, non-null column of a row, as text, by column name. */
 function allColumns(row: Record<string, unknown>, omit?: RegExp): Record<string, string> {
@@ -1057,9 +1059,13 @@ async function describeOtherObject(description: ObjectDescription, includeValues
   try {
     const [row] = await connection.runSQL(source.sql, { bindings: source.bindings });
     if (row) {
-      description.details = allColumns(row, type === "*DTAARA" && !includeValues ? DATA_AREA_VALUE_COLUMNS : undefined);
-      if (type === "*DTAARA" && !includeValues) {
-        description.notes.push("The data area's value is not shown: it can hold business data. The user can allow it with ibmi-member-workspace.researchTools.allowDataSamples.");
+      const withheld = includeValues ? undefined : type === "*DTAARA" ? DATA_AREA_VALUE_COLUMNS : type === "*JOBD" ? JOB_DESCRIPTION_DATA_COLUMNS : undefined;
+      description.details = allColumns(row, withheld);
+      if (withheld) {
+        description.notes.push(
+          (type === "*DTAARA" ? "The data area's value is not shown: it can hold business data." : "The job description's request and routing data are not shown: a command line there can hold a password.") +
+          " The user can allow it with ibmi-member-workspace.researchTools.allowDataSamples."
+        );
       }
     }
   } catch (err) {
@@ -1136,23 +1142,116 @@ export interface FieldColumn {
   text: string;
 }
 
+export interface SourceHit {
+  library: string;
+  sourceFile: string;
+  member: string;
+  extension: string;
+  /** The matching lines, at most `MAX_HIT_LINES`, with their 1-based numbers. */
+  lines: Array<{ number: number; content: string }>;
+  /** Matching lines in the member, when more than are listed. */
+  totalLines: number;
+}
+
 export interface FieldUsage {
   field: string;
   /** Files and tables with a column of that name. */
   columns: FieldColumn[];
-  /** Source members whose text mentions the name. */
-  members: SourceMemberMatch[];
+  /** Source members whose lines contain the name, with those lines. */
+  members: SourceHit[];
+  /** The source files searched, as LIB/FILE. */
+  filesSearched: string[];
   notes: string[];
 }
 
 /** Files one field lookup lists at most. */
 const MAX_FIELD_COLUMNS = 200;
 const FIELD_NAME = /^[A-Z0-9_$#@]{1,128}$/;
+/** Source files a text search reads at most: each is one grep over the file's members on the IBM i. */
+export const MAX_SEARCHED_SOURCE_FILES = 25;
+/** Matching lines kept per member. */
+const MAX_HIT_LINES = 20;
+
+/**
+ * The source members in `libraries` whose lines contain `term`, with the lines, through Code for
+ * IBM i's own member search (a grep over each source file's members in PASE). Reads at most
+ * `maxFiles` source files (the libraries' source physical files, in order) and stops at
+ * `maxMembers` members.
+ */
+export async function searchSourceText(
+  term: string,
+  libraries: readonly string[],
+  options: { maxFiles: number; maxMembers: number }
+): Promise<{ hits: SourceHit[]; filesSearched: string[]; notes: string[] }> {
+  const connection = requireConnection();
+  const search = getCodeForIBMi()?.searchTools;
+  if (!search) {
+    throw new Error("Code for IBM i is not active.");
+  }
+  const names = libraries.map((library) => objectName(library, "library"));
+  const notes: string[] = [];
+  if (names.length === 0) {
+    return { hits: [], filesSearched: [], notes: ["No library to search."] };
+  }
+  // The search runs through a shell, where `$` would expand: grep for the longest `$`-free part of
+  // the name, then keep only the lines that hold the whole name.
+  const wanted = term.toUpperCase();
+  const grepTerm = [...wanted.split("$")].sort((a, b) => b.length - a.length)[0] ?? "";
+  if (grepTerm === "") {
+    return { hits: [], filesSearched: [], notes: [`"${term}" can't be searched for: it has nothing but $.`] };
+  }
+  const maxFiles = Math.min(MAX_SEARCHED_SOURCE_FILES, Math.max(1, Math.floor(options.maxFiles)));
+  const files = await connection.runSQL(
+    "SELECT DISTINCT SYSTEM_TABLE_SCHEMA AS LIBRARY, SYSTEM_TABLE_NAME AS FILE FROM QSYS2.SYSPARTITIONSTAT " +
+    `WHERE SYSTEM_TABLE_SCHEMA IN (${names.map(() => "?").join(", ")}) AND SOURCE_TYPE IS NOT NULL ` +
+    `ORDER BY SYSTEM_TABLE_SCHEMA, SYSTEM_TABLE_NAME FETCH FIRST ${maxFiles + 1} ROWS ONLY`,
+    { bindings: [...names] }
+  );
+  if (files.length > maxFiles) {
+    notes.push(`Only the first ${maxFiles} source files of the libraries were searched; name fewer libraries for the rest.`);
+  }
+  const hits: SourceHit[] = [];
+  const filesSearched: string[] = [];
+  for (const row of files.slice(0, maxFiles)) {
+    const library = columnValue(row, "LIBRARY") ?? "";
+    const sourceFile = columnValue(row, "FILE") ?? "";
+    filesSearched.push(`${library}/${sourceFile}`);
+    let results;
+    try {
+      results = await search.searchMembers(connection, library, sourceFile, grepTerm, "*", true);
+    } catch (err) {
+      notes.push(`${library}/${sourceFile} could not be searched: ${errorMessage(err)}`);
+      continue;
+    }
+    for (const hit of results.hits) {
+      const matching = hit.lines.filter((line) => line.content.toUpperCase().includes(wanted));
+      if (matching.length === 0) {
+        continue;
+      }
+      const parts = hit.path.split("/").filter(Boolean);
+      const last = parts[parts.length - 1] ?? "";
+      const dot = last.lastIndexOf(".");
+      hits.push({
+        library: (parts.length >= 3 ? parts[parts.length - 3] : library).toUpperCase(),
+        sourceFile: (parts.length >= 2 ? parts[parts.length - 2] : sourceFile).toUpperCase(),
+        member: (dot > 0 ? last.slice(0, dot) : last).toUpperCase(),
+        extension: dot > 0 ? last.slice(dot + 1).toLowerCase() : "",
+        lines: matching.slice(0, MAX_HIT_LINES).map((line) => ({ number: line.number, content: line.content.trimEnd() })),
+        totalLines: matching.length,
+      });
+      if (hits.length >= options.maxMembers) {
+        notes.push(`Stopped at ${options.maxMembers} members; narrow the libraries for the rest.`);
+        return { hits, filesSearched, notes };
+      }
+    }
+  }
+  return { hits, filesSearched, notes };
+}
 
 /**
  * Where a field is defined (a column of that system or SQL name in `libraries`, or in `file`) and
- * which source members mention it. The text search is a plain substring search, so a name that
- * is part of longer names finds those too.
+ * which source members mention it: a text search of the libraries' source files for the name,
+ * so a name that is part of longer names finds those too.
  */
 export async function findFieldUsage(
   field: string,
@@ -1189,12 +1288,9 @@ export async function findFieldUsage(
       text: columnValue(row, "COLUMN_TEXT") ?? "",
     }));
   }
-  const members = await searchSourceMembers("*", libraries, { text: name, limit: options.memberLimit });
-  if (members.length >= options.memberLimit) {
-    notes.push(`Stopped at ${options.memberLimit} members; narrow the libraries for the rest.`);
-  }
-  notes.push("Members are found by a text search for the name, so longer names that contain it count too.");
-  return { field: name, columns, members, notes };
+  const search = await searchSourceText(name, libraries, { maxFiles: MAX_SEARCHED_SOURCE_FILES, maxMembers: options.memberLimit });
+  notes.push(...search.notes, "Members are found by a text search for the name, so longer names that contain it count too.");
+  return { field: name, columns, members: search.hits, filesSearched: search.filesSearched, notes };
 }
 
 export interface MemberLock {
@@ -1242,7 +1338,7 @@ export async function memberLocks(library: string, sourceFile: string, member: s
   let rows: Array<Record<string, unknown>>;
   try {
     rows = await connection.runSQL(
-      "SELECT JOB_NAME, JOB_USER, JOB_NUMBER, SYSTEM_TABLE_MEMBER, MEMBER_LOCK_TYPE, LOCK_STATE, LOCK_STATUS, LOCK_SCOPE, PROGRAM_NAME " +
+      "SELECT JOB_NAME, SYSTEM_TABLE_MEMBER, MEMBER_LOCK_TYPE, LOCK_STATE, LOCK_STATUS, LOCK_SCOPE, PROGRAM_NAME " +
       "FROM QSYS2.OBJECT_LOCK_INFO WHERE SYSTEM_OBJECT_SCHEMA = ? AND SYSTEM_OBJECT_NAME = ? AND OBJECT_TYPE = '*FILE' " +
       "AND (SYSTEM_TABLE_MEMBER = ? OR SYSTEM_TABLE_MEMBER IS NULL) ORDER BY SYSTEM_TABLE_MEMBER DESC, JOB_NAME",
       { bindings: [lib, file, mbr] }
@@ -1251,10 +1347,11 @@ export async function memberLocks(library: string, sourceFile: string, member: s
     notes.push(`QSYS2.OBJECT_LOCK_INFO could not be read on this IBM i: ${errorMessage(err)}`);
     return { locks: [], ownJob, notes };
   }
+  // number/user/name; JOB_USER and JOB_NUMBER are newer columns, so they are taken from the name.
   const locks = rows.map((row) => ({
     job: columnValue(row, "JOB_NAME") ?? "",
-    user: columnValue(row, "JOB_USER") ?? "",
-    number: columnValue(row, "JOB_NUMBER") ?? "",
+    user: (columnValue(row, "JOB_NAME") ?? "").split("/")[1] ?? "",
+    number: (columnValue(row, "JOB_NAME") ?? "").split("/")[0] ?? "",
     member: columnValue(row, "SYSTEM_TABLE_MEMBER") ?? "",
     lockType: columnValue(row, "MEMBER_LOCK_TYPE") ?? "",
     state: columnValue(row, "LOCK_STATE") ?? "",

@@ -38,7 +38,7 @@ import {
   summarizeRun,
 } from "../dependencySources";
 import { dependencyMarkdown } from "../dependencyDiagram";
-import { WalkLimitReached, WalkResult, WalkUnresolved, mergeOutcomes, walkDependencies } from "../dependencyWalk";
+import { WalkLimitReached, WalkResult, WalkUnresolved, mergeOutcomes, subjectKey, walkDependencies } from "../dependencyWalk";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
 import type { MemberInfo } from "../memberInfo";
@@ -138,9 +138,23 @@ export function registerDependencyCommands(ctx: CommandContext): void {
         }
       }
     ),
-    vscode.commands.registerCommand("ibmi-member-workspace.showDependencyDiagram", async () => {
+    vscode.commands.registerCommand("ibmi-member-workspace.showDependencyDiagram", async (item?: unknown) => {
       if (!lastWalk) {
         vscode.window.showInformationMessage("Run Find All Dependencies on a member first; its result is what the diagram shows.");
+        return;
+      }
+      const asked = item === undefined || item === null ? undefined : resolveMember(ctx.service, item);
+      if (asked && subjectKey(asked) !== subjectKey(lastWalk.root)) {
+        const choice = await vscode.window.showInformationMessage(
+          `The last Find All Dependencies was for ${subjectKey(lastWalk.root)}, not ${formatMemberPath(asked)}.`,
+          "Show That Diagram",
+          "Find All Dependencies…"
+        );
+        if (choice === "Find All Dependencies…") {
+          await reviewAllDependencies(ctx, asked);
+        } else if (choice === "Show That Diagram") {
+          await showDependencyDiagram(ctx, lastWalk);
+        }
         return;
       }
       await showDependencyDiagram(ctx, lastWalk);

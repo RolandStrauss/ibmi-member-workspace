@@ -45,8 +45,8 @@ describe("the notices", () => {
     assert.equal(reconnectedMessage("DEV", [member("A", "modified")]), "1 member on DEV still has changes not uploaded: A.");
     assert.equal(
       staleMessage([member("A", "in-sync"), member("B", "modified")], 14),
-      "2 members have been checked out for more than 14 days: A, B. Upload or discard what you're done with, or raise ibmi-member-workspace.staleCheckoutDays."
+      "2 members have been checked out for 14 days or more: A, B. Upload or discard what you're done with, or change when this reminder starts."
     );
-    assert.match(staleMessage([member("A", "in-sync")], 1), /more than 1 day:/);
+    assert.match(staleMessage([member("A", "in-sync")], 1), /for 1 day or more:/);
   });
 });

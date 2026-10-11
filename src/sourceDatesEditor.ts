@@ -62,9 +62,11 @@ export function registerSourceDates(context: vscode.ExtensionContext, service: C
       const first = Math.max(0, visible.start.line - MARGIN_LINES);
       const last = Math.min(editor.document.lineCount - 1, visible.end.line + MARGIN_LINES);
       for (let line = first; line <= last; line++) {
+        const date = lookup.dateAt(line);
         options.push({
           range: new vscode.Range(line, 0, line, 0),
-          renderOptions: { before: { contentText: lookup.dateAt(line) ?? BLANK } },
+          renderOptions: { before: { contentText: date ?? BLANK } },
+          ...(date ? { hoverMessage: `Last changed on the IBM i: ${date}` } : {}),
         });
       }
     }

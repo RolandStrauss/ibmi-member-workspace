@@ -54,20 +54,22 @@ describe("dependencyMermaid", () => {
   it("declares each member once, draws an edge per use and dashes unresolved ones", () => {
     const mermaid = dependencyMermaid(root, walk);
     assert.equal(mermaid.split("\n")[0], "graph LR");
-    assert.match(mermaid, /n0\["ORD100\nDEVLIB\/QRPGLESRC"\]/);
+    assert.match(mermaid, /n0\["ORD100<br\/>DEVLIB\/QRPGLESRC"\]/);
     assert.match(mermaid, /n0 -- calls --> n\d+/);
     assert.match(mermaid, /n\d+ -- file --> n\d+/);
-    assert.match(mermaid, /u0\["MISSING1\nsource not found"\]:::unresolved/);
+    assert.match(mermaid, /u0\["MISSING1<br\/>source not found"\]:::unresolved/);
     assert.match(mermaid, /-\. calls \.-> u0/);
     assert.match(mermaid, /classDef unresolved stroke-dasharray: 5 5$/);
     assert.equal((mermaid.match(/\["ORD200/g) ?? []).length, 1);
   });
 
-  it("escapes quotes in labels and leaves out the dashed style when everything resolved", () => {
-    const quoted = result([node("file", 'A"B', [])]);
+  it("escapes markup in labels and leaves out the dashed style when everything resolved", () => {
+    const quoted = result([node("file", 'A"B', [])], [missing("copybook", "/x/<a href=#1>", [])]);
     const mermaid = dependencyMermaid(root, quoted);
     assert.match(mermaid, /A#quot;B/);
-    assert.doesNotMatch(mermaid, /classDef/);
+    assert.match(mermaid, /\/x\/#lt;a href=#35;1#gt;/);
+    assert.doesNotMatch(mermaid, /<a /);
+    assert.doesNotMatch(dependencyMermaid(root, result([node("file", "A", [])])), /classDef/);
   });
 });
 

@@ -954,8 +954,9 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
       name: "find_field_usage",
       title: "Find where a field is defined and used",
       description: "Where a field (a column) is defined: the files and tables with a column of that system or SQL name in the " +
-        "libraries (QSYS2.SYSCOLUMNS), with its type and text; and the source members whose text mentions the name, " +
-        "found by a text search, so longer names containing it count too. For impact analysis of a field change.",
+        "libraries (QSYS2.SYSCOLUMNS), with its type and text; and the source members whose lines contain the name " +
+        "(a text search of the libraries' source files, at most 25 of them, with the matching lines and their numbers), " +
+        "so longer names containing it count too. For impact analysis of a field change.",
       inputSchema: {
         type: "object",
         properties: {

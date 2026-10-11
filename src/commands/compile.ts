@@ -88,7 +88,12 @@ async function compileOnIbmi(ctx: CommandContext, collection: vscode.DiagnosticC
     }
   }
 
-  const since = await currentTimestamp().catch(() => "");
+  // The IBM i's clock, to the second (members' change stamps have no finer precision), so only events this compile wrote count.
+  const since = (await currentTimestamp().catch(() => "")).slice(0, 19);
+  if (!since) {
+    vscode.window.showErrorMessage(`Could not read the IBM i's clock, which tells this compile's events from older ones; ${memberPath} was not compiled.`);
+    return;
+  }
   let result: unknown;
   try {
     result = await vscode.commands.executeCommand("code-for-ibmi.runAction", memberUri(entry));
@@ -107,7 +112,7 @@ async function compileOnIbmi(ctx: CommandContext, collection: vscode.DiagnosticC
     newest = newestEvfevent(await evfeventMembers(entry.memberName, libraries, since));
   } catch (err) {
     log.appendLine(`[compile] Could not look for the events of ${memberPath}: ${errorMessage(err)}`);
-    await offer(ctx, entry, `The action ran, but the compile's events couldn't be looked for: ${errorMessage(err)}`, ["Show Job Log"], true);
+    await offer(ctx, entry, `The action ran, but couldn't look for the compile's events: ${errorMessage(err)}`, ["Show Job Log"], true);
     return;
   }
   if (!newest) {
@@ -133,8 +138,11 @@ async function compileOnIbmi(ctx: CommandContext, collection: vscode.DiagnosticC
     return;
   }
   const shown = publish(collection, diagnostics, log);
+  const notCheckedOut = unresolvedFiles.length > 3
+    ? `${unresolvedFiles.slice(0, 3).join(", ")} and ${unresolvedFiles.length - 3} more`
+    : unresolvedFiles.join(", ");
   const message = summarizeCompile(entry.memberName, diagnostics, action.success) +
-    (unresolvedFiles.length > 0 ? ` Messages in files that aren't checked out: ${unresolvedFiles.join(", ")}.` : "");
+    (unresolvedFiles.length > 0 ? ` Messages in files that aren't checked out: ${notCheckedOut}.` : "");
   await offer(
     ctx,
     entry,
@@ -150,12 +158,17 @@ function actionOutcome(result: unknown): { ran: boolean; success?: boolean } {
     // An older Code for IBM i that returns nothing: look for the events anyway.
     return { ran: true };
   }
+  if (typeof result === "boolean") {
+    // Older Code for IBM i: the action's success only.
+    return { ran: true, success: result };
+  }
   if (typeof result !== "object") {
     return { ran: true };
   }
   const { success, output } = result as { success?: unknown; output?: unknown };
   // No target was processed: the action picker was dismissed, or Code for IBM i already said why.
-  const ran = !Array.isArray(output) || output.length > 0;
+  const targets = Array.isArray(output) ? (output as Array<{ hasRun?: unknown }>) : undefined;
+  const ran = targets === undefined || targets.some((target) => target.hasRun !== false);
   return { ran, ...(typeof success === "boolean" ? { success } : {}) };
 }
 
@@ -187,7 +200,10 @@ function publish(collection: vscode.DiagnosticCollection, diagnostics: readonly 
   for (const [localPath, ours] of byFile) {
     const uri = vscode.Uri.file(localPath);
     const others = vscode.languages.getDiagnostics(uri).filter((d) => d.source !== DIAGNOSTIC_SOURCE);
-    if (others.length > 0 && ours.every((d) => others.some((other) => other.range.start.line === d.line))) {
+    // Code for IBM i words its message as "CODE: text (severity)"; the text is what both share.
+    const same = (ours: CompileDiagnostic, other: vscode.Diagnostic) =>
+      other.range.start.line === ours.line && other.message.includes(ours.message.trim());
+    if (others.length > 0 && ours.every((d) => others.some((other) => same(d, other)))) {
       log.appendLine(`[compile] ${localPath}: the same messages are already shown by ${others[0].source ?? "another extension"}`);
       continue;
     }

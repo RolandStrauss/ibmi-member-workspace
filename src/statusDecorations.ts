@@ -1,4 +1,4 @@
-import type { CheckedOutMember } from "./types";
+import { CheckedOutMember, isDefaultWorkItem } from "./types";
 
 /**
  * How a checked-out file shows its status in the Explorer and on editor tabs. Kept free of the
@@ -64,13 +64,15 @@ export function browserDecorationFor(
   workItem: string
 ): StatusDecoration {
   const status = decorationFor(entry);
-  const where = entry.kind === "reference" ? "Reference copy here" : "Checked out here";
-  const detail = status
-    ? status.tooltip.replace(/^IBM i: /, "")
-    : "in sync with your local copy.";
+  const reference = entry.kind === "reference";
+  const where = `${reference ? "Reference copy here" : "Checked out here"}${isDefaultWorkItem(workItem) ? "" : ` (work item ${workItem})`}`;
+  let detail = status ? status.tooltip.replace(/^IBM i: /, "") : "in sync with your local copy";
+  if (reference && detail === "read-only reference copy") {
+    detail = "";
+  }
   return {
     badge: status?.badge ?? "CO",
-    tooltip: `${where} (work item ${workItem}): ${detail}`,
+    tooltip: detail ? `${where}: ${detail.replace(/\.$/, "")}.` : `${where}.`,
     colorId: status?.colorId,
   };
 }

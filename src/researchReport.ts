@@ -230,12 +230,19 @@ export function fieldUsageReport(usage: FieldUsage, system: string, libraries: r
   }
   lines.push("");
   if (usage.members.length === 0) {
-    lines.push("No source member in these libraries mentions it.");
+    lines.push(`No source member mentions it (searched ${usage.filesSearched.join(", ") || "no source file"}).`);
   } else {
-    lines.push(`Mentioned in ${usage.members.length} source member(s):`, "", ...textTable(
-      ["Library", "Source file", "Member", "Type", "Text"],
-      usage.members.map((member) => [member.library, member.sourceFile, member.member, member.sourceType, member.text ?? ""])
-    ));
+    lines.push(`Mentioned in ${usage.members.length} source member(s) (searched ${usage.filesSearched.join(", ")}):`, "");
+    for (const member of usage.members) {
+      lines.push(`${member.library}/${member.sourceFile}(${member.member})${member.extension ? ` ${member.extension.toUpperCase()}` : ""}: ${member.totalLines} line(s)`);
+      for (const line of member.lines) {
+        lines.push(`  ${String(line.number).padStart(6)}  ${line.content}`);
+      }
+      if (member.totalLines > member.lines.length) {
+        lines.push(`  … ${member.totalLines - member.lines.length} more`);
+      }
+      lines.push("");
+    }
   }
   if (usage.notes.length > 0) {
     lines.push("", ...usage.notes.map((note) => `Note: ${note}`));

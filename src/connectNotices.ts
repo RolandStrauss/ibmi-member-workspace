@@ -43,8 +43,8 @@ export function reconnectedMessage(system: string, unsent: readonly CheckedOutMe
 /** The reminder about members checked out for `thresholdDays` or longer. */
 export function staleMessage(stale: readonly CheckedOutMember[], thresholdDays: number): string {
   return (
-    `${members(stale.length)} ${stale.length === 1 ? "has" : "have"} been checked out for more than ` +
-    `${thresholdDays} day${thresholdDays === 1 ? "" : "s"}: ${listNames(stale)}. ` +
-    "Upload or discard what you're done with, or raise ibmi-member-workspace.staleCheckoutDays."
+    `${members(stale.length)} ${stale.length === 1 ? "has" : "have"} been checked out for ` +
+    `${thresholdDays} day${thresholdDays === 1 ? "" : "s"} or more: ${listNames(stale)}. ` +
+    "Upload or discard what you're done with, or change when this reminder starts."
   );
 }

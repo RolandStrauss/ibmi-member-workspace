@@ -27,9 +27,9 @@ const sys = path.join(root, "dev.example.com");
 describe("scanCheckoutFolder", () => {
   it("finds members three levels down, skipping what's tracked, dot folders, links and odd names", () => {
     const io = folder({
-      [sys]: ["DEVLIB", ".git", "PRODLIB", "notes.txt:file", "elsewhere:link"],
+      [sys]: ["DEVLIB", ".git", "PRODLIB", "notes.txt:file", "elsewhere:link", "lowerlib"],
       [path.join(sys, "DEVLIB")]: ["QRPGLESRC", "QCLSRC"],
-      [path.join(sys, "DEVLIB", "QRPGLESRC")]: ["ORD100.RPGLE:file", "ORD200.SQLRPGLE:file", "README:file", "ORD 300.RPGLE:file", "x.rpgle:link"],
+      [path.join(sys, "DEVLIB", "QRPGLESRC")]: ["ORD100.RPGLE:file", "ORD200.SQLRPGLE:file", "README:file", "ORD 300.RPGLE:file", "x.rpgle:link", "ord400.rpgle:file"],
       [path.join(sys, "DEVLIB", "QCLSRC")]: ["ORD100C.CLLE:file"],
       [path.join(sys, "PRODLIB")]: ["QRPGLESRC"],
       [path.join(sys, "PRODLIB", "QRPGLESRC")]: ["ORDUTIL.RPGLE:ro"],
@@ -42,8 +42,8 @@ describe("scanCheckoutFolder", () => {
       "PRODLIB/QRPGLESRC(ORDUTIL).rpgle ro",
     ]);
     assert.equal(result.candidates[1].localPath, path.join(sys, "DEVLIB", "QRPGLESRC", "ORD100.RPGLE"));
-    // README (no extension), "ORD 300" (not a name), two links.
-    assert.equal(result.skipped, 4);
+    // README (no extension), "ORD 300" (not a name), "ord400.rpgle" and "lowerlib" (not the layout's upper case), two links.
+    assert.equal(result.skipped, 6);
     assert.equal(result.truncated, false);
   });
 
