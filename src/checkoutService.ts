@@ -43,6 +43,7 @@ import {
 } from "./sync";
 import { BASELINE_DIR, BaselineFiles, BaselineStore, referencedBaselineHashes } from "./baselineStore";
 import { DATES_DIR, DateStore } from "./dateStore";
+import type { MemberInfo } from "./memberInfo";
 import { MergeSide, baselineAfterMergeSave } from "./mergePreparation";
 import {
   GitOperationResult,
@@ -89,6 +90,16 @@ type RefreshProgress = vscode.Progress<{ message?: string; increment?: number }>
 
 /** The `sourceDates` setting: no dates, dates on hover, or dates in the gutter too. */
 export type SourceDatesMode = "off" | "hover" | "gutter";
+
+/** How a file already in the checkout folder is adopted; see {@link CheckoutService.adoptMember}. */
+export interface AdoptOptions {
+  /** Track it as a read-only reference copy. */
+  reference: boolean;
+  system: string;
+  signal?: AbortSignal;
+  /** Collects the path for one checkpoint at the end of a batch instead of one per member. */
+  deferCheckpointTo?: string[];
+}
 
 export interface CheckoutOptions {
   redownloadBehavior?: "ask" | "skip" | "force";
@@ -922,6 +933,96 @@ export class CheckoutService implements vscode.Disposable {
       await this.markRemoteMissing(entry);
       throw new RemoteMemberMissingError(formatMemberPath(entry));
     }
+  }
+
+  /**
+   * Adopt Checkout Folder: starts tracking a file already in the checkout folder's layout, as a
+   * checkout of the member it is named after. The IBM i's copy becomes the baseline and the
+   * status says whether the local file differs from it; a member gone from the IBM i is adopted
+   * as "deleted on IBM i" with the local text as baseline. The local file is never written.
+   */
+  adoptMember(parts: MemberInfo, options: AdoptOptions): Promise<CheckedOutMember> {
+    return this.track(() => this.adoptMemberNow(parts, options));
+  }
+
+  private async adoptMemberNow(parts: MemberInfo, { reference, system, signal, deferCheckpointTo }: AdoptOptions): Promise<CheckedOutMember> {
+    const nameProblem = memberNameProblem(parts);
+    if (nameProblem) {
+      throw new Error(nameProblem);
+    }
+    const checkoutRoot = this.getCheckoutRoot();
+    if (!checkoutRoot) {
+      throw new Error("Choose a checkout folder first.");
+    }
+    this.assertConnectedTo(system);
+    this.ensureSystemState(system);
+    await this.ensureGitReady(system);
+    const id = buildCheckoutId(system, parts.library, parts.sourceFile, parts.memberName);
+    if (this.activeEntries(system).some((entry) => entry.id === id)) {
+      throw new Error("The member is already checked out in this work item.");
+    }
+    const { systemRoot, localPath } = checkoutFilePath(checkoutRoot.fsPath, { system, ...parts });
+    if (!pathIsInside(systemRoot, localPath)) {
+      throw new Error("The file is outside the checkout folder.");
+    }
+    this.assertLocalPathSafe(localPath);
+    const localContent = await this.readLocal(vscode.Uri.file(localPath));
+
+    let remoteContent: string | undefined;
+    try {
+      remoteContent = await this.download(parts.library, parts.sourceFile, parts.memberName, signal);
+    } catch (err) {
+      if (err instanceof TimedOutError || err instanceof CheckoutCancelledError) {
+        throw err;
+      }
+      const stamps = await memberChangeStamps(parts.library, parts.sourceFile, [parts.memberName]).catch(() => undefined);
+      if (stamps === undefined || stamps.has(parts.memberName.toUpperCase())) {
+        throw err;
+      }
+    }
+    const sourceLayout = await this.lookupSourceLayout(system, parts.library, parts.sourceFile);
+    if (signal?.aborted) {
+      throw new CheckoutCancelledError();
+    }
+
+    const now = new Date().toISOString();
+    const entry: CheckedOutMember = {
+      id,
+      system,
+      library: parts.library.toUpperCase(),
+      sourceFile: parts.sourceFile.toUpperCase(),
+      memberName: parts.memberName.toUpperCase(),
+      extension: parts.extension.toLowerCase(),
+      localPath,
+      checkedOutAt: now,
+      lastCheckedAt: now,
+      remoteHashAtCheckout: "",
+      ...(reference ? { kind: "reference" as const } : {}),
+      ...(sourceLayout ? { sourceLayout } : {}),
+      status: "checked-out",
+    };
+    const localHash = hashContent(localContent);
+    if (remoteContent === undefined) {
+      await this.setBaseline(entry, localHash, localContent);
+      entry.status = "remote-missing";
+    } else {
+      const remoteHash = hashContent(remoteContent);
+      await this.setBaseline(entry, remoteHash, remoteContent);
+      this.keepSourceDates(entry, remoteHash);
+      entry.status = classifyStatus(localHash, remoteHash, remoteHash);
+    }
+    this.log.appendLine(`[adopt] ${formatMemberPath(entry)} from ${localPath}: ${entry.status}`);
+    if (reference) {
+      await this.setReadOnly(localPath, true);
+    }
+    if (deferCheckpointTo) {
+      deferCheckpointTo.push(localPath);
+    } else {
+      this.logGitFailure(await this.saveCheckpoint(system, [localPath], `adopt: ${formatMemberPath(entry)} from ${system}`));
+    }
+    this.activeEntries(system).push(entry);
+    await this.persist();
+    return entry;
   }
 
   recheckout(entry: CheckedOutMember): Promise<void> {
