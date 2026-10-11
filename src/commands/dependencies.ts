@@ -37,7 +37,8 @@ import {
   selectProviders,
   summarizeRun,
 } from "../dependencySources";
-import { WalkLimitReached, WalkUnresolved, mergeOutcomes, walkDependencies } from "../dependencyWalk";
+import { dependencyMarkdown } from "../dependencyDiagram";
+import { WalkLimitReached, WalkResult, WalkUnresolved, mergeOutcomes, walkDependencies } from "../dependencyWalk";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
 import type { MemberInfo } from "../memberInfo";
@@ -136,8 +137,48 @@ export function registerDependencyCommands(ctx: CommandContext): void {
           await reviewAllDependencies(ctx, entry);
         }
       }
-    )
+    ),
+    vscode.commands.registerCommand("ibmi-member-workspace.showDependencyDiagram", async () => {
+      if (!lastWalk) {
+        vscode.window.showInformationMessage("Run Find All Dependencies on a member first; its result is what the diagram shows.");
+        return;
+      }
+      await showDependencyDiagram(ctx, lastWalk);
+    })
   );
+}
+
+/** The last Find All Dependencies result, for Show Dependency Diagram. */
+interface Walk {
+  root: DependencySubject;
+  result: WalkResult;
+}
+
+let lastWalk: Walk | undefined;
+
+function rememberWalk(walk: Walk): void {
+  lastWalk = walk;
+  void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:dependencyResultAvailable", true);
+}
+
+/**
+ * Opens the walk as a Markdown document with a Mermaid graph and a text tree: in the Markdown
+ * preview when an extension renders Mermaid there, otherwise as text (the document says how to
+ * get the picture).
+ */
+async function showDependencyDiagram(ctx: CommandContext, walk: Walk): Promise<void> {
+  const mermaidSupported = vscode.extensions.getExtension("bierner.markdown-mermaid") !== undefined;
+  const title = `Dependencies ${walk.root.library}_${walk.root.sourceFile}_${walk.root.memberName}`;
+  const markdown = dependencyMarkdown(walk.root, walk.result, { mermaidSupported });
+  const uri = await ctx.reports.open(title, markdown, { extension: "md", show: !mermaidSupported });
+  if (mermaidSupported) {
+    try {
+      await vscode.commands.executeCommand("markdown.showPreview", uri);
+    } catch (err) {
+      ctx.log.appendLine(`[dependencies] Could not open the Markdown preview: ${errorMessage(err)}`);
+      await vscode.window.showTextDocument(uri, { preview: false });
+    }
+  }
 }
 
 /**
@@ -297,6 +338,8 @@ export async function reviewAllDependencies(
     }
     return;
   }
+  const walk: Walk = { root: entry, result };
+  rememberWalk(walk);
   const items = buildItems(ctx, system, result.nodes);
   if (items.length === 0) {
     reportUnresolved(ctx, memberPath, result.unresolved, rescope);
@@ -310,6 +353,7 @@ export async function reviewAllDependencies(
     memberPath,
     unresolved: result.unresolved,
     rescope,
+    diagram: walk,
   });
 }
 
@@ -372,15 +416,24 @@ async function pickAndBring(
   ctx: CommandContext,
   system: string,
   items: DependencyItem[],
-  { title, placeHolder, memberPath, unresolved, rescope }: {
+  { title, placeHolder, memberPath, unresolved, rescope, diagram }: {
     title: string;
     placeHolder: string;
     memberPath: string;
     unresolved: WalkUnresolved[];
     rescope: Rescope;
+    /** Find All Dependencies' walk, for the picker's Show as Diagram button. */
+    diagram?: Walk;
   }
 ): Promise<void> {
-  const outcome = await pickDependencies(items, `${title} · ${capitalize(describeScope(rescope.scope))}`, placeHolder);
+  let outcome = await pickDependencies(items, `${title} · ${capitalize(describeScope(rescope.scope))}`, placeHolder, { diagram: diagram !== undefined });
+  while (outcome === "showDiagram") {
+    if (!diagram) {
+      return;
+    }
+    await showDependencyDiagram(ctx, diagram);
+    outcome = await pickDependencies(items, `${title} · ${capitalize(describeScope(rescope.scope))}`, placeHolder, { diagram: true });
+  }
   if (outcome === "changeScope") {
     const kind = await pickSearchScope(ctx, rescope.scope);
     if (kind) {
@@ -417,21 +470,27 @@ async function pickAndBring(
 }
 
 /**
- * The dependency list, with a title button to search in another scope. Resolves with the chosen
- * items, "changeScope", or undefined when dismissed.
+ * The dependency list, with a title button to search in another scope and, for Find All
+ * Dependencies, one to show the result as a diagram. Resolves with the chosen items,
+ * "changeScope", "showDiagram", or undefined when dismissed.
  */
 function pickDependencies<T extends vscode.QuickPickItem>(
   items: T[],
   title: string,
-  placeholder: string
-): Promise<readonly T[] | "changeScope" | undefined> {
+  placeholder: string,
+  options: { diagram: boolean } = { diagram: false }
+): Promise<readonly T[] | "changeScope" | "showDiagram" | undefined> {
   return new Promise((resolve) => {
     const quickPick = vscode.window.createQuickPick<T>();
     const scopeButton: vscode.QuickInputButton = {
       iconPath: new vscode.ThemeIcon("library"),
       tooltip: "Search in Other Libraries…",
     };
-    let result: readonly T[] | "changeScope" | undefined;
+    const diagramButton: vscode.QuickInputButton = {
+      iconPath: new vscode.ThemeIcon("type-hierarchy"),
+      tooltip: "Show as Diagram",
+    };
+    let result: readonly T[] | "changeScope" | "showDiagram" | undefined;
     quickPick.items = items;
     quickPick.selectedItems = items.filter((item) => item.picked);
     quickPick.canSelectMany = true;
@@ -439,9 +498,9 @@ function pickDependencies<T extends vscode.QuickPickItem>(
     quickPick.placeholder = placeholder;
     quickPick.matchOnDescription = true;
     quickPick.matchOnDetail = true;
-    quickPick.buttons = [scopeButton];
-    quickPick.onDidTriggerButton(() => {
-      result = "changeScope";
+    quickPick.buttons = options.diagram ? [diagramButton, scopeButton] : [scopeButton];
+    quickPick.onDidTriggerButton((button) => {
+      result = button === diagramButton ? "showDiagram" : "changeScope";
       quickPick.hide();
     });
     quickPick.onDidAccept(() => {

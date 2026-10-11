@@ -157,6 +157,18 @@
         "category": "IBM i Member Workspace"
       },
       {
+        "command": "ibmi-member-workspace.newMember",
+        "title": "New Member…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "ibmi-member-workspace.copyMemberAs",
+        "title": "Copy Member As…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(copy)"
+      },
+      {
         "command": "ibmi-member-workspace.findDependencies",
         "title": "Find Dependencies…",
         "category": "IBM i Member Workspace"
@@ -165,6 +177,12 @@
         "command": "ibmi-member-workspace.findAllDependencies",
         "title": "Find All Dependencies…",
         "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.showDependencyDiagram",
+        "title": "Show Dependency Diagram",
+        "category": "IBM i Member Workspace",
+        "icon": "$(type-hierarchy)"
       },
       {
         "command": "ibmi-member-workspace.research.findWhereUsed",
@@ -550,12 +568,24 @@
           "when": "false"
         },
         {
+          "command": "ibmi-member-workspace.newMember",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.copyMemberAs",
+          "when": "ibmi-member-workspace:checkoutActive"
+        },
+        {
           "command": "ibmi-member-workspace.findDependencies",
           "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.findAllDependencies",
           "when": "ibmi-member-workspace:checkoutActive"
+        },
+        {
+          "command": "ibmi-member-workspace.showDependencyDiagram",
+          "when": "ibmi-member-workspace:dependencyResultAvailable"
         },
         {
           "command": "ibmi-member-workspace.research.findWhereUsed",
@@ -778,6 +808,11 @@
           "group": "ibmiCheckout@1"
         },
         {
+          "command": "ibmi-member-workspace.newMember",
+          "when": "view == objectBrowser && (viewItem == SPF || (viewItem == SPF_readonly && config.ibmi-member-workspace.allowCheckoutFromProtectedFilter))",
+          "group": "ibmiCheckout@2"
+        },
+        {
           "command": "ibmi-member-workspace.refreshRemote",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "inline@1"
@@ -853,24 +888,34 @@
           "group": "0_bob@3"
         },
         {
+          "command": "ibmi-member-workspace.showDependencyDiagram",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection && ibmi-member-workspace:dependencyResultAvailable",
+          "group": "0_bob@4"
+        },
+        {
           "submenu": "ibmi-member-workspace.research",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
-          "group": "0_bob@4"
+          "group": "0_bob@5"
         },
         {
           "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
-          "group": "0_bob@4"
+          "group": "0_bob@6"
         },
         {
           "command": "ibmi-member-workspace.checkinThroughChangeManagement",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/",
-          "group": "0_bob@5"
+          "group": "0_bob@7"
         },
         {
           "command": "ibmi-member-workspace.copyMemberPath",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "5_util@1"
+        },
+        {
+          "command": "ibmi-member-workspace.copyMemberAs",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
+          "group": "5_util@2"
         },
         {
           "command": "ibmi-member-workspace.commitNow",
@@ -1025,6 +1070,11 @@
           "command": "ibmi-member-workspace.agents.disconnect",
           "when": "view == ibmi-member-workspace.agentsView",
           "group": "agents@2"
+        },
+        {
+          "command": "ibmi-member-workspace.newMember",
+          "when": "view == ibmi-member-workspace.checkoutView && code-for-ibmi:connected",
+          "group": "1_members@1"
         },
         {
           "command": "ibmi-member-workspace.configureCheckoutFolder",
@@ -1185,9 +1235,14 @@
           "group": "4_deps@2"
         },
         {
+          "command": "ibmi-member-workspace.showDependencyDiagram",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths && ibmi-member-workspace:dependencyResultAvailable",
+          "group": "4_deps@3"
+        },
+        {
           "submenu": "ibmi-member-workspace.research",
           "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
-          "group": "4_deps@3"
+          "group": "4_deps@4"
         },
         {
           "command": "ibmi-member-workspace.compareWithRemote",
@@ -1213,6 +1268,11 @@
           "command": "ibmi-member-workspace.revealInExplorer",
           "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
           "group": "6_util@2"
+        },
+        {
+          "command": "ibmi-member-workspace.copyMemberAs",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "6_util@3"
         }
       ],
       "ibmi-member-workspace.editorCompareWith": [

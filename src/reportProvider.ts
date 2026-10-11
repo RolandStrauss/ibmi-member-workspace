@@ -26,8 +26,11 @@ export class ReportProvider implements vscode.TextDocumentContentProvider, vscod
     return this.reports.get(uri.toString()) ?? "This report was closed. Run the command again.\n";
   }
 
-  /** Opens `text` as a document titled `title`; `.md` gets Markdown's language, otherwise plain text. */
-  async open(title: string, text: string, options: { extension?: "txt" | "md" } = {}): Promise<vscode.Uri> {
+  /**
+   * Opens `text` as a document titled `title`; `.md` gets Markdown's language, otherwise plain
+   * text. With `show: false` the document is only loaded (for a preview to render), not shown.
+   */
+  async open(title: string, text: string, options: { extension?: "txt" | "md"; show?: boolean } = {}): Promise<vscode.Uri> {
     const file = title.replace(/[\\/:*?"<>|]/g, "_");
     const uri = vscode.Uri.from({
       scheme: REPORT_SCHEME,
@@ -36,7 +39,9 @@ export class ReportProvider implements vscode.TextDocumentContentProvider, vscod
     });
     this.reports.set(uri.toString(), text);
     const doc = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(doc, { preview: false });
+    if (options.show !== false) {
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
     return uri;
   }
 
