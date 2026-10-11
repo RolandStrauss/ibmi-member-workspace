@@ -412,7 +412,7 @@
       },
       {
         "command": "ibmi-member-workspace.moveToWorkItem",
-        "title": "Move to Work Item\u2026",
+        "title": "Move to Work Item…",
         "category": "IBM i Member Workspace",
         "icon": "$(git-branch)"
       },
@@ -1515,6 +1515,7 @@
     "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --external:vscode --outfile=dist/extension.js --minify --sourcemap=external",
     "lint": "eslint src",
     "test": "npm run compile && npm run bundle && node --test \"out/test/**/*.test.js\"",
+    "test:smoke": "npm run compile && npm run bundle && node out/test/vscode/runSmoke.js",
     "package": "vsce package",
     "package:list": "vsce ls"
   },
@@ -1523,6 +1524,7 @@
     "@halcyontech/vscode-ibmi-types": "^3.0.13",
     "@types/node": "^20.19.43",
     "@types/vscode": "~1.90.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "4.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
