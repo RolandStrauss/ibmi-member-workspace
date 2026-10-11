@@ -387,7 +387,7 @@ function resourceUriOf(node: BrowserNode | undefined): UriParts | undefined {
     : vscode.Uri.parse(String(resourceUri));
 }
 
-function sourceFileInfoOf(node: BrowserNode | undefined): SourceFileInfo | undefined {
+export function sourceFileInfoOf(node: BrowserNode | undefined): SourceFileInfo | undefined {
   return extractSourceFileInfo(node, resourceUriOf(node));
 }
 

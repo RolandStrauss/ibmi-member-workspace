@@ -28,6 +28,7 @@ import { offerLegacyRepositoryRepair, registerGitCommands } from "./commands/git
 import { registerAutoUpload } from "./commands/autoUpload";
 import { registerBackgroundRefresh } from "./commands/backgroundRefresh";
 import { registerConnectNotices } from "./commands/connectNotices";
+import { registerMemberCreateCommands } from "./commands/memberCreate";
 import { registerAgentCommands } from "./commands/agents";
 import { registerBobCommands } from "./commands/bob";
 import { registerSyncCommands } from "./commands/sync";
@@ -236,6 +237,7 @@ export async function activate(
   };
   registerCheckoutFolderCommands(ctx);
   registerCheckoutCommands(ctx);
+  registerMemberCreateCommands(ctx);
   registerSyncCommands(ctx);
   registerCompareCommands(ctx);
   registerDependencyCommands(ctx);
