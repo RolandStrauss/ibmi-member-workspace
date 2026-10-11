@@ -53,3 +53,24 @@ export function decorationFor(entry: Pick<CheckedOutMember, "status" | "kind">):
       return undefined;
   }
 }
+
+/**
+ * The decoration for the same member in Code for IBM i's Object Browser: that it is checked out
+ * here (in which work item), with its status when that matters. Unlike the Explorer, a member in
+ * sync is marked too, so a developer browsing the IBM i sees what is already local.
+ */
+export function browserDecorationFor(
+  entry: Pick<CheckedOutMember, "status" | "kind">,
+  workItem: string
+): StatusDecoration {
+  const status = decorationFor(entry);
+  const where = entry.kind === "reference" ? "Reference copy here" : "Checked out here";
+  const detail = status
+    ? status.tooltip.replace(/^IBM i: /, "")
+    : "in sync with your local copy.";
+  return {
+    badge: status?.badge ?? "CO",
+    tooltip: `${where} (work item ${workItem}): ${detail}`,
+    colorId: status?.colorId,
+  };
+}

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { decorationFor } from "../statusDecorations";
+import { browserDecorationFor, decorationFor } from "../statusDecorations";
 
 describe("decorationFor", () => {
   it("marks local changes, remote changes and conflicts with arrows and a bang", () => {
@@ -45,5 +45,28 @@ describe("decorationFor", () => {
         assert.ok(badge.length >= 1 && badge.length <= 2, `${status} ${kind}`);
       }
     }
+  });
+});
+
+describe("browserDecorationFor", () => {
+  it("marks a member in sync as checked out here, naming the work item", () => {
+    assert.deepEqual(browserDecorationFor({ status: "in-sync" }, "TICKET-42"), {
+      badge: "CO",
+      tooltip: "Checked out here (work item TICKET-42): in sync with your local copy.",
+      colorId: undefined,
+    });
+  });
+
+  it("keeps the status badge and color for a member with local changes", () => {
+    const decoration = browserDecorationFor({ status: "modified" }, "workspace");
+    assert.equal(decoration.badge, "↑");
+    assert.equal(decoration.colorId, "gitDecoration.modifiedResourceForeground");
+    assert.equal(decoration.tooltip, "Checked out here (work item workspace): local changes not yet uploaded");
+  });
+
+  it("says a reference copy is a reference copy", () => {
+    const decoration = browserDecorationFor({ status: "in-sync", kind: "reference" }, "workspace");
+    assert.equal(decoration.badge, "RO");
+    assert.match(decoration.tooltip, /^Reference copy here \(work item workspace\): read-only reference copy$/);
   });
 });
