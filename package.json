@@ -179,6 +179,12 @@
         "category": "IBM i Member Workspace"
       },
       {
+        "command": "ibmi-member-workspace.compileOnIbmi",
+        "title": "Compile on IBM i…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(gear)"
+      },
+      {
         "command": "ibmi-member-workspace.adoptCheckoutFolder",
         "title": "Adopt Members Already in the Checkout Folder…",
         "category": "IBM i Member Workspace",
@@ -608,6 +614,10 @@
           "when": "ibmi-member-workspace:checkoutActive"
         },
         {
+          "command": "ibmi-member-workspace.compileOnIbmi",
+          "when": "ibmi-member-workspace:editableCheckoutActive"
+        },
+        {
           "command": "ibmi-member-workspace.adoptCheckoutFolder",
           "when": "code-for-ibmi:connected"
         },
@@ -898,6 +908,11 @@
           "group": "2_merge@3"
         },
         {
+          "command": "ibmi-member-workspace.compileOnIbmi",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/ && !listMultiSelection",
+          "group": "2_merge@4"
+        },
+        {
           "command": "ibmi-member-workspace.compareWithRemote",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "3_compare@1"
@@ -965,12 +980,12 @@
         {
           "command": "ibmi-member-workspace.commitNow",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/ && !listMultiSelection && config.ibmi-member-workspace.gitIntegration",
-          "group": "2_merge@4"
+          "group": "2_merge@5"
         },
         {
           "command": "ibmi-member-workspace.moveToWorkItem",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && config.ibmi-member-workspace.gitIntegration",
-          "group": "2_merge@5"
+          "group": "2_merge@6"
         },
         {
           "command": "ibmi-member-workspace.discardCheckout",
@@ -1275,9 +1290,14 @@
           "group": "2_run@1"
         },
         {
-          "command": "ibmi-member-workspace.checkinThroughChangeManagement",
+          "command": "ibmi-member-workspace.compileOnIbmi",
           "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
           "group": "2_run@2"
+        },
+        {
+          "command": "ibmi-member-workspace.checkinThroughChangeManagement",
+          "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
+          "group": "2_run@3"
         },
         {
           "command": "ibmi-member-workspace.openRemoteFile",
@@ -1409,6 +1429,12 @@
         "command": "ibmi-member-workspace.checkinThroughChangeManagement",
         "key": "ctrl+alt+k",
         "mac": "cmd+alt+k",
+        "when": "editorTextFocus && ibmi-member-workspace:editableCheckoutActive"
+      },
+      {
+        "command": "ibmi-member-workspace.compileOnIbmi",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b",
         "when": "editorTextFocus && ibmi-member-workspace:editableCheckoutActive"
       }
     ],

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { CodeForIBMi, IBMiMember } from "@halcyontech/vscode-ibmi-types";
+import type { CodeForIBMi, FileError, IBMiMember } from "@halcyontech/vscode-ibmi-types";
 import type { SourceMemberRow } from "./dependencyResolve";
 import {
   CompiledObject,
@@ -1136,6 +1136,39 @@ export async function downloadSourceDates(library: string, sourceFile: string, m
       await connection.runSQL("DROP ALIAS QTEMP.IMWDATES").catch(() => undefined);
     }
   });
+}
+
+/**
+ * The EVFEVENT members named `member` (a compile's events, written with OPTION(*EVENTF)) in
+ * `libraries`, changed since `since` (an IBM i timestamp), newest first. EVFEVENT members have no
+ * source type, so `findSourceMembers` can't find them.
+ */
+export async function evfeventMembers(
+  member: string,
+  libraries: readonly string[],
+  since: string
+): Promise<Array<{ library: string; updated: string }>> {
+  const names = libraries.map((library) => objectName(library, "library"));
+  if (names.length === 0) {
+    return [];
+  }
+  const rows = await requireConnection().runSQL(
+    "SELECT SYSTEM_TABLE_SCHEMA AS LIBRARY, VARCHAR(LAST_CHANGE_TIMESTAMP) AS UPDATED FROM QSYS2.SYSPARTITIONSTAT " +
+    `WHERE SYSTEM_TABLE_NAME = 'EVFEVENT' AND SYSTEM_TABLE_MEMBER = ? AND SYSTEM_TABLE_SCHEMA IN (${names.map(() => "?").join(", ")})` +
+    (since ? " AND LAST_CHANGE_TIMESTAMP >= TIMESTAMP(?)" : "") +
+    " ORDER BY LAST_CHANGE_TIMESTAMP DESC",
+    { bindings: [objectName(member, "member"), ...names, ...(since ? [since] : [])] }
+  );
+  return rows.map((row) => ({ library: String(row.LIBRARY ?? "").trim(), updated: String(row.UPDATED ?? "").trim() }));
+}
+
+/** Code for IBM i's parser for the lines of an EVFEVENT member: errors per file path. */
+export function parseEvfevent(lines: string[]): Map<string, FileError[]> {
+  const api = getCodeForIBMi();
+  if (!api?.evfeventParser) {
+    throw new Error("Code for IBM i is not active.");
+  }
+  return api.evfeventParser(lines);
 }
 
 export async function listSourceFileMembers(

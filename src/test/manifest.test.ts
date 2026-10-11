@@ -279,7 +279,7 @@ describe("extension manifest", () => {
     const editableCheckout = "resourcePath in ibmi-member-workspace:editableCheckoutPaths";
     // Writes to the IBM i (or runs an action there) need a member that can be uploaded: not a
     // reference copy, not deleted on the IBM i. The rest work on any checkout.
-    const writers = ["uploadToRemote", "mergeBack", "runAction", "checkinThroughChangeManagement"].map(command);
+    const writers = ["uploadToRemote", "mergeBack", "runAction", "checkinThroughChangeManagement", "compileOnIbmi"].map(command);
     const readers = [
       "refreshRemote", "openRemoteFile", "findDependencies", "findAllDependencies", "copyMemberPath", "revealInExplorer",
       "compareWithRemote", "showChangesSinceCheckout", "toggleSourceDates",

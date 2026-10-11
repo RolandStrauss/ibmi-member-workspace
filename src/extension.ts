@@ -31,6 +31,7 @@ import { registerBackgroundRefresh } from "./commands/backgroundRefresh";
 import { registerConnectNotices } from "./commands/connectNotices";
 import { registerMemberCreateCommands } from "./commands/memberCreate";
 import { registerAdoptFolderCommand } from "./commands/adoptFolder";
+import { registerCompileCommand } from "./commands/compile";
 import { registerWorkItemExportCommands } from "./commands/workItemExport";
 import { registerAgentCommands } from "./commands/agents";
 import { registerBobCommands } from "./commands/bob";
@@ -243,6 +244,7 @@ export async function activate(
   registerMemberCreateCommands(ctx);
   registerAdoptFolderCommand(ctx);
   registerWorkItemExportCommands(ctx);
+  registerCompileCommand(ctx);
   registerSyncCommands(ctx);
   registerCompareCommands(ctx);
   registerDependencyCommands(ctx);
