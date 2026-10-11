@@ -78,17 +78,43 @@ export function statusDescription(entry: CheckedOutMember, format: DateFormat): 
   }
 }
 
-/** A member's description: a missing local file first, then reference copies, then its status. */
-export function memberDescription(entry: CheckedOutMember, localMissing: boolean, format: DateFormat): string {
-  return localMissing
-    ? "local file missing — Refresh to re-checkout or remove"
-    : isReferenceCopy(entry)
-      ? `reference · ${statusDescription(entry, format)}`
-      : statusDescription(entry, format);
+/** The stale-checkout reminder: members checked out for `thresholdDays` or longer (0 turns it off). */
+export interface StaleCheck {
+  now: Date;
+  thresholdDays: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whole days since the member was checked out; 0 for a checkout today or an unreadable date. */
+export function checkoutAgeDays(entry: Pick<CheckedOutMember, "checkedOutAt">, now: Date): number {
+  const age = Math.floor((now.getTime() - Date.parse(entry.checkedOutAt)) / DAY_MS);
+  return Number.isFinite(age) && age > 0 ? age : 0;
+}
+
+/** Whether a checkout for change has been out for the reminder's number of days. Reference copies never are. */
+export function isStale(entry: Pick<CheckedOutMember, "checkedOutAt" | "kind">, stale: StaleCheck): boolean {
+  return stale.thresholdDays > 0 && !isReferenceCopy(entry) && checkoutAgeDays(entry, stale.now) >= stale.thresholdDays;
+}
+
+/** The stale checkouts, oldest first. */
+export function staleEntries(entries: readonly CheckedOutMember[], stale: StaleCheck): CheckedOutMember[] {
+  return entries
+    .filter((entry) => isStale(entry, stale))
+    .sort((a, b) => Date.parse(a.checkedOutAt) - Date.parse(b.checkedOutAt));
+}
+
+/** A member's description: a missing local file first, then reference copies, then its status, then its age when stale. */
+export function memberDescription(entry: CheckedOutMember, localMissing: boolean, format: DateFormat, stale?: StaleCheck): string {
+  if (localMissing) {
+    return "local file missing — Refresh to re-checkout or remove";
+  }
+  const status = isReferenceCopy(entry) ? `reference · ${statusDescription(entry, format)}` : statusDescription(entry, format);
+  return stale && isStale(entry, stale) ? `${status} · ${checkoutAgeDays(entry, stale.now)} days` : status;
 }
 
 /** A member's tooltip, as Markdown. */
-export function memberTooltip(entry: CheckedOutMember, localMissing: boolean, format: DateFormat): string {
+export function memberTooltip(entry: CheckedOutMember, localMissing: boolean, format: DateFormat, stale?: StaleCheck): string {
   let md = `**${formatMemberPath(entry)}**\n\n`;
   if (isReferenceCopy(entry)) {
     md += "Read-only reference copy: it can't be uploaded or merged back.\n\n";
@@ -98,7 +124,11 @@ export function memberTooltip(entry: CheckedOutMember, localMissing: boolean, fo
   }
   md += `- **System:** ${entry.system}\n`;
   md += `- **Status:** ${entry.status}\n`;
-  md += `- **Checked out:** ${format.dateTime(entry.checkedOutAt)}\n`;
+  md += `- **Checked out:** ${format.dateTime(entry.checkedOutAt)}`;
+  if (stale && isStale(entry, stale)) {
+    md += ` (${checkoutAgeDays(entry, stale.now)} days ago)`;
+  }
+  md += "\n";
   if (entry.lastCheckedAt) {
     md += `- **Last checked:** ${format.dateTime(entry.lastCheckedAt)}\n`;
   }

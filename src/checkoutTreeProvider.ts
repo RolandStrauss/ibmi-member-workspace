@@ -5,6 +5,7 @@ import { CheckoutService } from "./checkoutService";
 import {
   DateFormat,
   IconSpec,
+  StaleCheck,
   contextValueFor,
   matchesSearch,
   memberDescription,
@@ -14,6 +15,7 @@ import {
   sourceFileGroups,
 } from "./checkoutTreeModel";
 import { getSystemName } from "./codeForIBMi";
+import { staleThreshold } from "./commands/connectNotices";
 
 /** Dates as VS Code's locale shows them. */
 const LOCAL_DATES: DateFormat = {
@@ -158,8 +160,9 @@ export class CheckoutTreeProvider
     item.id = `member:${entry.id}`;
     item.resourceUri = vscode.Uri.file(entry.localPath);
     const localMissing = !fs.existsSync(entry.localPath);
-    item.description = memberDescription(entry, localMissing, LOCAL_DATES);
-    item.tooltip = new vscode.MarkdownString(memberTooltip(entry, localMissing, LOCAL_DATES));
+    const stale: StaleCheck = { now: new Date(), thresholdDays: staleThreshold() };
+    item.description = memberDescription(entry, localMissing, LOCAL_DATES, stale);
+    item.tooltip = new vscode.MarkdownString(memberTooltip(entry, localMissing, LOCAL_DATES, stale));
     item.iconPath = themeIcon(memberIcon(entry, localMissing));
     // Reference copies get their own prefix so Upload, Merge Back and Run Action don't apply.
     item.contextValue = contextValueFor(entry);

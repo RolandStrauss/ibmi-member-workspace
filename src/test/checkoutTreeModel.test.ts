@@ -2,7 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   DateFormat,
+  checkoutAgeDays,
   contextValueFor,
+  isStale,
+  staleEntries,
   matchesSearch,
   memberDescription,
   memberIcon,
@@ -95,5 +98,36 @@ describe("checkoutTreeModel: how a member looks", () => {
     assert.match(tooltip, /no longer exists on the IBM i/);
     assert.match(tooltip, /\(missing\)\n$/);
     assert.doesNotMatch(tooltip, /Last checked/);
+  });
+});
+
+describe("stale checkouts", () => {
+  const now = new Date("2026-10-10T12:00:00.000Z");
+  const stale = { now, thresholdDays: 14 };
+
+  it("counts whole days since the checkout, never negative, and 0 for an unreadable date", () => {
+    assert.equal(checkoutAgeDays({ checkedOutAt: "2026-10-10T08:00:00.000Z" }, now), 0);
+    assert.equal(checkoutAgeDays({ checkedOutAt: "2026-09-17T13:00:00.000Z" }, now), 22);
+    assert.equal(checkoutAgeDays({ checkedOutAt: "2026-10-20T00:00:00.000Z" }, now), 0);
+    assert.equal(checkoutAgeDays({ checkedOutAt: "not a date" }, now), 0);
+  });
+
+  it("calls a checkout stale from the threshold on, never a reference copy, never when off", () => {
+    const old = member("LIB", "QRPGLESRC", "OLD", { checkedOutAt: "2026-09-26T12:00:00.000Z" });
+    assert.equal(isStale(old, stale), true);
+    assert.equal(isStale({ ...old, checkedOutAt: "2026-09-27T12:00:00.000Z" }, stale), false);
+    assert.equal(isStale({ ...old, kind: "reference" }, stale), false);
+    assert.equal(isStale(old, { now, thresholdDays: 0 }), false);
+  });
+
+  it("lists stale checkouts oldest first and shows their age in the description and tooltip", () => {
+    const a = member("LIB", "QRPGLESRC", "A", { checkedOutAt: "2026-09-01T00:00:00.000Z", status: "in-sync" });
+    const b = member("LIB", "QRPGLESRC", "B", { checkedOutAt: "2026-08-01T00:00:00.000Z", status: "modified" });
+    const fresh = member("LIB", "QRPGLESRC", "C", { checkedOutAt: "2026-10-09T00:00:00.000Z" });
+    assert.deepEqual(staleEntries([a, fresh, b], stale).map((entry) => entry.memberName), ["B", "A"]);
+    assert.equal(memberDescription(a, false, format, stale), "in sync 2026-09-01 · 39 days");
+    assert.equal(memberDescription(fresh, false, format, stale), "in sync 2026-10-09");
+    assert.match(memberTooltip(a, false, format, stale), /\*\*Checked out:\*\* 2026-09-01T00:00:00.000Z \(39 days ago\)/);
+    assert.doesNotMatch(memberTooltip(fresh, false, format, stale), /days ago/);
   });
 });

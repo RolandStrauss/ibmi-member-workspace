@@ -27,6 +27,7 @@ import { registerFindMemberCommands } from "./commands/findMember";
 import { offerLegacyRepositoryRepair, registerGitCommands } from "./commands/git";
 import { registerAutoUpload } from "./commands/autoUpload";
 import { registerBackgroundRefresh } from "./commands/backgroundRefresh";
+import { registerConnectNotices } from "./commands/connectNotices";
 import { registerAgentCommands } from "./commands/agents";
 import { registerBobCommands } from "./commands/bob";
 import { registerSyncCommands } from "./commands/sync";
@@ -245,6 +246,7 @@ export async function activate(
   registerGitCommands(ctx);
   registerSourceDiagnostics(context, service);
   registerBackgroundRefresh(ctx);
+  registerConnectNotices(ctx);
 
   // In IBM Bob, Bob's agent uses the research tools, and so can Claude Code and Codex; in VS Code,
   // Claude Code, Codex and GitHub Copilot can.

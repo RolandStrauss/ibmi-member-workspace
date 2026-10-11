@@ -1300,6 +1300,13 @@
           "default": true,
           "description": "Automatically open the file in the editor after checkout."
         },
+        "ibmi-member-workspace.staleCheckoutDays": {
+          "type": "integer",
+          "default": 14,
+          "minimum": 0,
+          "maximum": 365,
+          "description": "Remind about members checked out for change for this many days or longer: their age shows in Checked Out Members, and a notice after connecting lists them. 0 turns the reminder off."
+        },
         "ibmi-member-workspace.allowCheckoutFromProtectedFilter": {
           "type": "boolean",
           "default": false,
