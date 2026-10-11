@@ -245,6 +245,18 @@
         "icon": "$(output)"
       },
       {
+        "command": "ibmi-member-workspace.research.findFieldUsage",
+        "title": "Find Field Usage…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(symbol-field)"
+      },
+      {
+        "command": "ibmi-member-workspace.research.memberLocks",
+        "title": "Show Member Locks…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(lock)"
+      },
+      {
         "command": "ibmi-member-workspace.findMember",
         "title": "Find Member…",
         "category": "IBM i Member Workspace",
@@ -655,6 +667,14 @@
         },
         {
           "command": "ibmi-member-workspace.research.jobLog",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.research.findFieldUsage",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.research.memberLocks",
           "when": "code-for-ibmi:connected"
         },
         {
@@ -1403,6 +1423,14 @@
         {
           "command": "ibmi-member-workspace.research.jobLog",
           "group": "research@5"
+        },
+        {
+          "command": "ibmi-member-workspace.research.findFieldUsage",
+          "group": "research@6"
+        },
+        {
+          "command": "ibmi-member-workspace.research.memberLocks",
+          "group": "research@7"
         }
       ]
     },
@@ -1544,7 +1572,7 @@
           "type": "boolean",
           "default": false,
           "scope": "application",
-          "markdownDescription": "Let the `sample_file_data` research tool return the first rows of a file or table (at most 100) to IBM Bob's agent, Claude Code, Codex or GitHub Copilot. Rows can hold business data, so this is off until you turn it on. The other research tools return only metadata and source. User settings only."
+          "markdownDescription": "Let the research tools return business data to IBM Bob's agent, Claude Code, Codex or GitHub Copilot: `sample_file_data` (the first rows of a file or table, at most 100), `sql_query` (the rows of one read-only SELECT) and a data area's value in `describe_object`. Rows and values can hold business data, so this is off until you turn it on. The other research tools return only metadata and source. User settings only."
         },
         "ibmi-member-workspace.dependencies.suggestAfterCheckout": {
           "type": "boolean",

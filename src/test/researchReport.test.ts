@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   describeUsage,
+  fieldUsageReport,
   fileDescriptionReport,
+  memberLocksReport,
+  summarizeLocks,
   jobLogReport,
   objectDescriptionReport,
   objectTypeForSourceType,
@@ -111,5 +114,43 @@ describe("objectTypeForSourceType", () => {
     assert.equal(objectTypeForSourceType("pf"), "*FILE");
     assert.equal(objectTypeForSourceType("DSPF"), "*FILE");
     assert.equal(objectTypeForSourceType("rpgle"), undefined);
+  });
+});
+
+describe("member locks", () => {
+  const own = { job: "111111/DEV/QZDASOINIT", user: "DEV", number: "111111", member: "ORDENT", lockType: "MEMBER", state: "*SHRRD", status: "HELD", scope: "JOB", program: "" };
+  const seu = { job: "123456/JSMITH/QPADEV0001", user: "JSMITH", number: "123456", member: "ORDENT", lockType: "MEMBER", state: "*SHRNUP", status: "HELD", scope: "JOB", program: "QSEU" };
+  const file = { ...seu, job: "123457/BATCH/QBATCH", member: "", lockType: "", state: "*SHRRD", status: "WAITING" };
+
+  it("summarizes the other jobs in one line", () => {
+    assert.equal(summarizeLocks([]), "");
+    assert.equal(summarizeLocks([seu]), "Also open in job 123456/JSMITH/QPADEV0001 (*SHRNUP).");
+    assert.equal(summarizeLocks([seu, file]), "Also open in jobs 123456/JSMITH/QPADEV0001 (*SHRNUP); 123457/BATCH/QBATCH (*SHRRD, whole file, waiting).");
+  });
+
+  it("reports every lock, marking this connection, and says when there are none", () => {
+    const report = memberLocksReport({ library: "PRODSRC", sourceFile: "QRPGLESRC", memberName: "ORDENT", system: "SYS", locks: [own, seu], ownJob: own.job, notes: [] });
+    assert.match(report, /^Locks on PRODSRC\/QRPGLESRC\(ORDENT\) on SYS\n\n2 lock\(s\):/);
+    assert.match(report, /111111\/DEV\/QZDASOINIT \(this connection\)/);
+    assert.match(report, /QSEU/);
+    assert.match(memberLocksReport({ library: "A", sourceFile: "B", memberName: "C", system: "SYS", locks: [], ownJob: "", notes: [] }), /No job holds a lock/);
+    assert.match(memberLocksReport({ library: "A", sourceFile: "B", memberName: "C", system: "SYS", locks: [], ownJob: "", notes: ["view missing"] }), /No locks could be read\.[\s\S]*Note: view missing/);
+  });
+});
+
+describe("fieldUsageReport", () => {
+  it("lists the files defining the field and the members mentioning it", () => {
+    const report = fieldUsageReport({
+      field: "CUSTNO",
+      columns: [{ library: "PRODDTA", file: "CUSTMAST", sqlName: "CUSTOMER_MASTER", column: "CUSTNO", systemColumn: "CUSTNO", type: "NUMERIC", length: "7", scale: "0", text: "Customer number" }],
+      members: [{ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", sourceType: "SQLRPGLE", text: "Order entry", lastChanged: "" }],
+      notes: ["text search"],
+    }, "SYS", ["PRODDTA", "PRODSRC"]);
+    assert.match(report, /^Field CUSTNO on SYS\nLibraries searched: PRODDTA, PRODSRC\n/);
+    assert.match(report, /Defined in 1 file\(s\):/);
+    assert.match(report, /CUSTOMER_MASTER/);
+    assert.match(report, /Mentioned in 1 source member\(s\):/);
+    assert.match(report, /Note: text search/);
+    assert.match(fieldUsageReport({ field: "X", columns: [], members: [], notes: [] }, "SYS", []), /No file or table[\s\S]*No source member/);
   });
 });

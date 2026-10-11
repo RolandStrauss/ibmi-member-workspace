@@ -67,8 +67,11 @@ export const RULES_BODY = `# IBM i Member Workspace
 
 - Use the \`${MCP_SERVER_NAME}\` MCP tools to research IBM i programs: \`find_member_dependencies\` for what a
   member uses, \`find_where_used\` for what uses a program or file, \`describe_file\` for file layouts,
-  \`describe_object\` for a program's attributes and what is bound into it, \`read_member_source\` to read a
-  member, \`compare_checkout\` for how a checked-out member differs from the IBM i, \`read_job_log\` for why
+  \`describe_object\` for a program's attributes and what is bound into it (also commands, data areas, data
+  queues and job descriptions), \`list_objects\` for what a library holds, \`find_field_usage\` for where a
+  field is defined and which members mention it, \`list_member_locks\` for who has a member open,
+  \`read_member_source\` to read a member (with \`includeDates\` for when each line last changed),
+  \`compare_checkout\` for how a checked-out member differs from the IBM i, \`read_job_log\` for why
   a command failed, \`read_spool_file\` for a compile listing, and, only when the user has allowed it,
   \`sample_file_data\` for a few rows of a file and \`sql_query\` for one read-only SELECT.
 - Members these tools bring into the checkout folder are **read-only reference copies**. They may be

@@ -12,6 +12,8 @@ import {
   searchSourceMembers,
   serviceProgramExports,
   whereUsed,
+  findFieldUsage,
+  memberLocks,
 } from "../codeForIBMi";
 import { objectKey } from "../dependencySources";
 import { errorMessage } from "../errors";
@@ -19,8 +21,10 @@ import { foundMembersOf } from "../findMemberView";
 import type { BrowserNode, MemberInfo } from "../memberInfo";
 import { resolveMember } from "../prompts";
 import {
+  fieldUsageReport,
   fileDescriptionReport,
   jobLogReport,
+  memberLocksReport,
   objectDescriptionReport,
   objectTypeForSourceType,
   serviceProgramExportsReport,
@@ -46,6 +50,9 @@ const JOB_LOG_MESSAGES = 200;
 interface ResearchTarget {
   name: string;
   sourceType?: string;
+  /** Where the member is, when a member (not a typed name) was the target. */
+  library?: string;
+  sourceFile?: string;
 }
 
 export function registerResearchCommands(ctx: CommandContext): void {
@@ -156,6 +163,49 @@ export function registerResearchCommands(ctx: CommandContext): void {
     await reports.open(`Exports ${program.library}/${program.name}`, serviceProgramExportsReport(program, system));
   })));
 
+  context.subscriptions.push(vscode.commands.registerCommand(
+    "ibmi-member-workspace.research.findFieldUsage",
+    async () => {
+      const system = getSystemName();
+      if (!system) {
+        vscode.window.showWarningMessage("Connect to an IBM i first: Find Field Usage asks it.");
+        return;
+      }
+      const field = await vscode.window.showInputBox({
+        title: "Find Field Usage",
+        prompt: "The field (column) name, looked for in the dependency search libraries: files that define it, and members that mention it",
+        value: vscode.window.activeTextEditor?.document.getText(vscode.window.activeTextEditor.selection).trim() || undefined,
+        validateInput: (value) => (FIELD_NAME.test(value.trim()) ? undefined : "A field or column name (letters, digits, _ $ # @)"),
+      });
+      if (!field) {
+        return;
+      }
+      const libraries = searchLibraries();
+      try {
+        const usage = await withNotification(`Finding where ${field.trim().toUpperCase()} is used...`, () =>
+          findFieldUsage(field.trim(), { libraries, memberLimit: FIELD_MEMBERS })
+        );
+        await reports.open(`Field ${usage.field}`, fieldUsageReport(usage, system, libraries));
+      } catch (err) {
+        vscode.window.showErrorMessage(`Find Field Usage failed: ${errorMessage(err)}`);
+      }
+    }
+  ));
+
+  context.subscriptions.push(vscode.commands.registerCommand(
+    "ibmi-member-workspace.research.memberLocks",
+    onMembers("Show Member Locks", "Member as LIBRARY/SOURCEFILE(MEMBER)", async (target, system) => {
+      if (!target.library || !target.sourceFile) {
+        vscode.window.showWarningMessage(`Show Member Locks needs the member's library and source file: use it on a member, or type LIB/FILE(MBR).`);
+        return;
+      }
+      const locks = await withNotification(`Reading the locks on ${target.name}...`, () => memberLocks(target.library!, target.sourceFile!, target.name));
+      await reports.open(`Locks ${target.library}_${target.sourceFile}_${target.name}`, memberLocksReport({
+        library: target.library, sourceFile: target.sourceFile, memberName: target.name, system, ...locks,
+      }));
+    })
+  ));
+
   context.subscriptions.push(
     vscode.commands.registerCommand("ibmi-member-workspace.research.jobLog", async () => {
       const system = getSystemName();
@@ -191,17 +241,17 @@ function targetsOf(ctx: CommandContext, arg: unknown, all?: unknown[]): Research
   for (const item of selections) {
     const entry = resolveMember(ctx.service, item);
     if (entry) {
-      targets.push({ name: entry.memberName, sourceType: entry.extension });
+      targets.push({ name: entry.memberName, sourceType: entry.extension, library: entry.library, sourceFile: entry.sourceFile });
       continue;
     }
     const found = foundMembersOf(item, undefined);
     if (found.length > 0) {
-      targets.push(...found.map((member: MemberInfo) => ({ name: member.memberName, sourceType: member.extension })));
+      targets.push(...found.map((member: MemberInfo) => ({ name: member.memberName, sourceType: member.extension, library: member.library, sourceFile: member.sourceFile })));
       continue;
     }
     const info = memberInfoOf(item as BrowserNode);
     if (info) {
-      targets.push({ name: info.memberName, sourceType: info.extension });
+      targets.push({ name: info.memberName, sourceType: info.extension, library: info.library, sourceFile: info.sourceFile });
     }
   }
   if (targets.length === 0) {
@@ -210,20 +260,34 @@ function targetsOf(ctx: CommandContext, arg: unknown, all?: unknown[]): Research
   return targets;
 }
 
-/** Asks for a name, suggesting the member open in the editor. */
+/** LIBRARY/SOURCEFILE(MEMBER), as Copy Member Path writes it. */
+const MEMBER_PATH = /^([A-Z0-9_$#@][A-Z0-9_$#@.]{0,9})\/([A-Z0-9_$#@][A-Z0-9_$#@.]{0,9})\(([A-Z0-9_$#@][A-Z0-9_$#@.]{0,9})\)$/i;
+const FIELD_NAME = /^[A-Z0-9_$#@]{1,128}$/i;
+/** Source members Find Field Usage lists at most. */
+const FIELD_MEMBERS = 200;
+
+/** Asks for a name (or LIBRARY/SOURCEFILE(MEMBER)), suggesting the member open in the editor. */
 async function askForName(ctx: CommandContext, what: string, prompt: string): Promise<ResearchTarget[]> {
   const active = resolveMember(ctx.service, undefined);
+  const wantsPath = /LIBRARY\/SOURCEFILE/.test(prompt);
   const typed = await vscode.window.showInputBox({
     title: what,
-    prompt: `${prompt} (looked for in the dependency search libraries)`,
-    value: active?.memberName,
-    validateInput: (value) => (OBJECT_NAME.test(value.trim()) ? undefined : "An IBM i object name of up to 10 characters"),
+    prompt: wantsPath ? prompt : `${prompt} (looked for in the dependency search libraries)`,
+    value: wantsPath && active ? `${active.library}/${active.sourceFile}(${active.memberName})` : active?.memberName,
+    validateInput: (value) => (OBJECT_NAME.test(value.trim()) || MEMBER_PATH.test(value.trim())
+      ? undefined
+      : wantsPath ? "LIBRARY/SOURCEFILE(MEMBER)" : "An IBM i object name of up to 10 characters"),
   });
   if (!typed) {
     return [];
   }
+  const path = MEMBER_PATH.exec(typed.trim());
+  if (path) {
+    const [, library, sourceFile, name] = path.map((part) => part.toUpperCase());
+    return [{ name, library, sourceFile, sourceType: active && active.memberName === name ? active.extension : undefined }];
+  }
   const name = typed.trim().toUpperCase();
-  return [{ name, sourceType: active && active.memberName === name ? active.extension : undefined }];
+  return [{ name, sourceType: active && active.memberName === name ? active.extension : undefined, ...(active && active.memberName === name ? { library: active.library, sourceFile: active.sourceFile } : {}) }];
 }
 
 async function withNotification<T>(title: string, run: () => Promise<T>): Promise<T> {

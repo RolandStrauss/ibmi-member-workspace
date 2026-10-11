@@ -10,6 +10,9 @@ import type {
   SourceMemberMatch,
   SpooledFileInfo,
   WhereUsedRow,
+  FieldUsage,
+  MemberLocks,
+  ObjectRow,
 } from "./codeForIBMi";
 import { guardReadOnlyQuery } from "./sqlGuard";
 import { unifiedDiff } from "./lineDiff";
@@ -61,7 +64,7 @@ export interface ResearchIo {
   ): Promise<{ library: string; name: string; exports: ServiceProgramExport[] } | undefined>;
   /** The member's text as it is on the IBM i now; rejects when `system` isn't the connected one. */
   downloadMember(system: string, library: string, sourceFile: string, member: string, signal?: AbortSignal): Promise<string>;
-  describeObject(name: string, libraries: string[], types?: string[]): Promise<ObjectDescription | undefined>;
+  describeObject(name: string, libraries: string[], types?: string[], options?: { includeValues?: boolean }): Promise<ObjectDescription | undefined>;
   jobLogMessages(options: { job?: string; maxMessages: number; minSeverity: number }): Promise<{ job: string; messages: JobLogMessage[] }>;
   sampleFileRows(name: string, libraries: string[], options: { member?: string; maxRows: number }): Promise<FileSample | undefined>;
   /** The user's `researchTools.allowDataSamples` setting, read on every call. */
@@ -77,6 +80,9 @@ export interface ResearchIo {
   dataSamplesSetting?: string;
   /** The checkout's baseline text with the IBM i's source date of each of its lines, when kept. */
   sourceDates(entry: CheckedOutMember): Promise<{ baseline: string; dates: string[] } | undefined>;
+  listObjects(library: string, options: { types?: readonly string[]; namePattern?: string; limit: number }): Promise<ObjectRow[]>;
+  findFieldUsage(field: string, options: { file?: string; libraries: string[]; memberLimit: number }): Promise<FieldUsage>;
+  memberLocks(library: string, sourceFile: string, member: string): Promise<MemberLocks>;
 }
 
 /** Rows `sample_file_data` returns when no number is given, and at most. */
@@ -121,6 +127,10 @@ export function clampLibraryLimit(value: unknown): number {
 }
 /** Lines `read_member_source` returns when no range is given. */
 const DEFAULT_LINES = 3000;
+/** Object types `describe_object` describes; `codeForIBMi.describeObject` knows the same list. */
+const DESCRIBABLE_TYPES = ["*PGM", "*SRVPGM", "*CMD", "*DTAARA", "*DTAQ", "*JOBD"] as const;
+/** Objects `list_objects` returns at most. */
+const MAX_LISTED_OBJECTS = 500;
 
 const NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/;
 const PATTERN = /^[A-Z0-9_$#@.*%]{1,10}$/;
@@ -276,7 +286,9 @@ export const SERVER_INSTRUCTIONS =
   "IBM i program research tools from the IBM i Member Workspace extension. Use them to find what a " +
   "program uses (copybooks, called programs, files, SQL tables, bound procedures), what uses a program or " +
   "file (find_where_used), file layouts (describe_file), a program's attributes and what is bound into it " +
-  "(describe_object), service program exports, how a checked-out member differs from the IBM i (compare_checkout), " +
+  "(describe_object, also for commands, data areas, data queues and job descriptions), what a library holds (list_objects), " +
+  "where a field is defined and used (find_field_usage), who has a member open (list_member_locks), service program exports, " +
+  "how a checked-out member differs from the IBM i (compare_checkout), " +
   "a job's log (read_job_log), a spooled file such as a compile listing (read_spool_file) and, when the user allows it, " +
   "a few rows of a file (sample_file_data) or the rows of one read-only SQL query (sql_query). Source members you " +
   "look at are brought into the local checkout folder as READ-ONLY REFERENCE COPIES: they may be production " +
@@ -698,14 +710,16 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
       title: "Describe a program or service program",
       description: "A program's or service program's attributes: ILE or OPM, source language, text, owner, when it was " +
         "created and last used, the source it was compiled from, activation group, adopted authority, entry module, and " +
-        "the modules and service programs bound into it (QSYS2.OBJECT_STATISTICS, PROGRAM_INFO, BOUND_MODULE_INFO, BOUND_SRVPGM_INFO).",
+        "the modules and service programs bound into it (QSYS2.OBJECT_STATISTICS, PROGRAM_INFO, BOUND_MODULE_INFO, BOUND_SRVPGM_INFO). " +
+        "With objectType *CMD, *DTAARA, *DTAQ or *JOBD: a command, data area, data queue or job description, with the " +
+        "columns of its QSYS2 view (a data area's value only when the user allows data samples).",
       inputSchema: {
         type: "object",
         properties: {
-          name: { type: "string", description: "Program or service program name." },
+          name: { type: "string", description: "Object name." },
           library: { type: "string", description: "Library; otherwise the search libraries are tried in order." },
           libraries: librariesSchema,
-          objectType: { type: "string", enum: ["*PGM", "*SRVPGM"], description: "Only this type; default both." },
+          objectType: { type: "string", enum: [...DESCRIBABLE_TYPES], description: "Only this type; default *PGM and *SRVPGM." },
         },
         required: ["name"],
         additionalProperties: false,
@@ -717,10 +731,10 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
         const library = name(args, "library", "library", true);
         const searched = library ? [library] : libraries(args, io).libraries;
         const objectType = args.objectType === undefined ? undefined : String(args.objectType).trim().toUpperCase();
-        if (objectType !== undefined && objectType !== "*PGM" && objectType !== "*SRVPGM") {
-          throw new ToolInputError('"objectType" must be *PGM or *SRVPGM.');
+        if (objectType !== undefined && !(DESCRIBABLE_TYPES as readonly string[]).includes(objectType)) {
+          throw new ToolInputError(`"objectType" must be one of ${DESCRIBABLE_TYPES.join(", ")}.`);
         }
-        const description = await io.describeObject(object, searched, objectType ? [objectType] : undefined);
+        const description = await io.describeObject(object, searched, objectType ? [objectType] : undefined, { includeValues: io.allowDataSamples() });
         if (!description) {
           throw new Error(`No ${objectType ?? "program or service program"} named ${object} in ${searched.join(", ") || "the search libraries"}.`);
         }
@@ -897,6 +911,96 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
           return readSpool(io, found[0], args);
         }
         return readSpool(io, { job, name: spoolName ?? "*", number }, args);
+      },
+    },
+    {
+      name: "list_objects",
+      title: "List the objects of a library",
+      description: `What a library holds: each object's name, type, attribute (RPGLE, PF, LF…), text, size, when it was last changed and used, ` +
+        `and the source member it was created from, from QSYS2.OBJECT_STATISTICS. Up to ${MAX_LISTED_OBJECTS} objects; narrow with objectTypes or a generic name.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          library: { type: "string", description: "The library to list." },
+          objectTypes: { type: "array", items: { type: "string" }, maxItems: 20, description: "Only these types, e.g. [\"*PGM\", \"*FILE\"]; default all." },
+          namePattern: { type: "string", description: "A name, a generic name such as ORD*, or *ALL (default)." },
+          limit: { type: "integer", minimum: 1, maximum: MAX_LISTED_OBJECTS, description: `Objects at most; default ${MAX_LISTED_OBJECTS}.` },
+        },
+        required: ["library"],
+        additionalProperties: false,
+      },
+      readOnly: true,
+      call: async (args) => {
+        requireSystem(io);
+        const library = name(args, "library", "library");
+        const types = args.objectTypes === undefined || args.objectTypes === null ? undefined : args.objectTypes;
+        if (types !== undefined && (!Array.isArray(types) || types.length > 20 || !types.every((type) => /^\*[A-Z]{1,9}$/i.test(String(type))))) {
+          throw new ToolInputError('"objectTypes" must be an array of up to 20 object types such as *PGM or *FILE.');
+        }
+        const namePattern = args.namePattern === undefined || args.namePattern === null ? undefined : String(args.namePattern).trim().toUpperCase();
+        if (namePattern !== undefined && !/^(\*ALL|[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}\*?)$/.test(namePattern)) {
+          throw new ToolInputError('"namePattern" must be an object name, a generic name such as ORD*, or *ALL.');
+        }
+        const limit = integer(args, "limit", MAX_LISTED_OBJECTS, 1, MAX_LISTED_OBJECTS);
+        const objects = await io.listObjects(library, { types: types?.map((type) => String(type).toUpperCase()), namePattern, limit });
+        return {
+          library,
+          objects,
+          ...(objects.length >= limit ? { note: `Stopped at ${limit} objects; narrow with objectTypes or namePattern for the rest.` } : {}),
+        };
+      },
+    },
+    {
+      name: "find_field_usage",
+      title: "Find where a field is defined and used",
+      description: "Where a field (a column) is defined: the files and tables with a column of that system or SQL name in the " +
+        "libraries (QSYS2.SYSCOLUMNS), with its type and text; and the source members whose text mentions the name, " +
+        "found by a text search, so longer names containing it count too. For impact analysis of a field change.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          field: { type: "string", description: "The field or column name, e.g. CUSTNO." },
+          file: { type: "string", description: "Only this file's columns; members are still searched in the libraries." },
+          libraries: librariesSchema,
+          memberLimit: { type: "integer", minimum: 1, maximum: 500, description: "Source members at most; default 100." },
+        },
+        required: ["field"],
+        additionalProperties: false,
+      },
+      readOnly: true,
+      call: async (args) => {
+        requireSystem(io);
+        const field = String(args.field ?? "").trim().toUpperCase();
+        if (!/^[A-Z0-9_$#@]{1,128}$/.test(field)) {
+          throw new ToolInputError('"field" must be a field or column name.');
+        }
+        const file = name(args, "file", "file", true);
+        const { libraries: searched } = libraries(args, io);
+        const memberLimit = integer(args, "memberLimit", 100, 1, 500);
+        const usage = await io.findFieldUsage(field, { file, libraries: searched, memberLimit });
+        return { ...usage, librariesSearched: searched };
+      },
+    },
+    {
+      name: "list_member_locks",
+      title: "List who has a member open",
+      description: "The locks on a source member and on its file (QSYS2.OBJECT_LOCK_INFO): which jobs have it open, for example " +
+        "in SEU, PDM or another editor, with the lock's state (*SHRNUP, *EXCLRD…) and status. Why an upload or a compile " +
+        "may fail with a lock error.",
+      inputSchema: { type: "object", properties: memberSchema, required: ["library", "sourceFile", "member"], additionalProperties: false },
+      readOnly: true,
+      call: async (args) => {
+        const system = requireSystem(io);
+        const library = name(args, "library", "library");
+        const sourceFile = name(args, "sourceFile", "source file");
+        const member = name(args, "member", "member");
+        const { locks, ownJob, notes } = await io.memberLocks(library, sourceFile, member);
+        return {
+          system,
+          member: `${library}/${sourceFile}(${member})`,
+          locks: locks.map((lock) => ({ ...lock, thisConnection: lock.job === ownJob })),
+          notes,
+        };
       },
     },
   ];

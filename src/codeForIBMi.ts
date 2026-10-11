@@ -882,7 +882,28 @@ export interface ObjectDescription {
   modules?: Array<Record<string, string>>;
   /** From QSYS2.BOUND_SRVPGM_INFO; absent when it couldn't be read. */
   boundServicePrograms?: Array<Record<string, string>>;
+  /** For a command, data area, data queue or job description: the columns of its QSYS2 view, by column name. */
+  details?: Record<string, string>;
+  /** The view `details` came from. */
+  detailsSource?: string;
   notes: string[];
+}
+
+/** Object types `describeObject` knows how to describe beyond OBJECT_STATISTICS. */
+export const DESCRIBABLE_TYPES = ["*PGM", "*SRVPGM", "*CMD", "*DTAARA", "*DTAQ", "*JOBD"] as const;
+
+/** Columns of a data area's row that hold its value, withheld unless the user allows data samples. */
+const DATA_AREA_VALUE_COLUMNS = /VALUE/;
+
+/** Every present, non-null column of a row, as text, by column name. */
+function allColumns(row: Record<string, unknown>, omit?: RegExp): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value !== null && value !== undefined && !(omit && omit.test(key.toUpperCase()))) {
+      out[key.toUpperCase()] = String(value).trim();
+    }
+  }
+  return out;
 }
 
 /**
@@ -893,7 +914,8 @@ export interface ObjectDescription {
 export async function describeObject(
   name: string,
   libraries: string[],
-  types: string[] = ["*PGM", "*SRVPGM"]
+  types: string[] = ["*PGM", "*SRVPGM"],
+  options: { includeValues?: boolean } = {}
 ): Promise<ObjectDescription | undefined> {
   const connection = requireConnection();
   const object = objectName(name, "object");
@@ -929,6 +951,10 @@ export async function describeObject(
     }),
     notes: [],
   };
+  if (type !== "*PGM" && type !== "*SRVPGM") {
+    await describeOtherObject(description, options.includeValues === true);
+    return description;
+  }
   const where = "WHERE PROGRAM_LIBRARY = ? AND PROGRAM_NAME = ? AND OBJECT_TYPE = ?";
   const bindings = [library, description.name, type];
   try {
@@ -995,6 +1021,248 @@ function objectType(type: string): string {
     throw new Error(`Not a valid object type: ${type}`);
   }
   return upper;
+}
+
+/**
+ * The QSYS2 view for a command, data area, data queue or job description, as `details`: every
+ * column it has on this release. A data area's value columns are left out unless `includeValues`.
+ */
+async function describeOtherObject(description: ObjectDescription, includeValues: boolean): Promise<void> {
+  const connection = requireConnection();
+  const { library, name, type } = description;
+  const sources: Record<string, { sql: string; bindings: string[] }> = {
+    "*CMD": {
+      sql: "SELECT * FROM QSYS2.COMMAND_INFO WHERE COMMAND_LIBRARY = ? AND COMMAND_NAME = ?",
+      bindings: [library, name],
+    },
+    "*DTAARA": {
+      sql: "SELECT * FROM TABLE(QSYS2.DATA_AREA_INFO(DATA_AREA_NAME => ?, DATA_AREA_LIBRARY => ?)) X",
+      bindings: [name, library],
+    },
+    "*DTAQ": {
+      sql: "SELECT * FROM QSYS2.DATA_QUEUE_INFO WHERE DATA_QUEUE_LIBRARY = ? AND DATA_QUEUE_NAME = ?",
+      bindings: [library, name],
+    },
+    "*JOBD": {
+      sql: "SELECT * FROM QSYS2.JOB_DESCRIPTION_INFO WHERE JOB_DESCRIPTION_LIBRARY = ? AND JOB_DESCRIPTION = ?",
+      bindings: [library, name],
+    },
+  };
+  const source = sources[type];
+  if (!source) {
+    description.notes.push(`Only what OBJECT_STATISTICS says is shown for a ${type}.`);
+    return;
+  }
+  description.detailsSource = source.sql.replace(/^.*?(QSYS2\.[A-Z_]+).*$/, "$1");
+  try {
+    const [row] = await connection.runSQL(source.sql, { bindings: source.bindings });
+    if (row) {
+      description.details = allColumns(row, type === "*DTAARA" && !includeValues ? DATA_AREA_VALUE_COLUMNS : undefined);
+      if (type === "*DTAARA" && !includeValues) {
+        description.notes.push("The data area's value is not shown: it can hold business data. The user can allow it with ibmi-member-workspace.researchTools.allowDataSamples.");
+      }
+    }
+  } catch (err) {
+    description.notes.push(`${description.detailsSource} could not be read: ${errorMessage(err)}`);
+  }
+}
+
+export interface ObjectRow {
+  name: string;
+  type: string;
+  attribute: string;
+  text: string;
+  lastUsed: string;
+  daysUsed: string;
+  changed: string;
+  size: string;
+  sourceLibrary: string;
+  sourceFile: string;
+  sourceMember: string;
+}
+
+/** Objects `list_objects` returns at most. */
+export const MAX_LISTED_OBJECTS = 500;
+
+/** A name or a generic name (`ORD*`) OBJECT_STATISTICS accepts; `*ALL` for every object. */
+const GENERIC_NAME = /^(\*ALL|[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}\*?)$/;
+
+/**
+ * The objects of a library, by name, optionally of some types and matching a generic name, from
+ * QSYS2.OBJECT_STATISTICS. The library and the name are bound; the types are validated and
+ * written into the statement, as elsewhere.
+ */
+export async function listObjects(
+  library: string,
+  options: { types?: readonly string[]; namePattern?: string; limit: number }
+): Promise<ObjectRow[]> {
+  const lib = objectName(library, "library");
+  const pattern = (options.namePattern ?? "*ALL").trim().toUpperCase();
+  if (!GENERIC_NAME.test(pattern)) {
+    throw new Error(`Not an object name or generic name: ${options.namePattern}`);
+  }
+  const typeList = options.types && options.types.length > 0 ? options.types.map((type) => objectType(type)).join(" ") : "*ALL";
+  const limit = Math.min(MAX_LISTED_OBJECTS, Math.max(1, Math.floor(options.limit)));
+  const rows = await requireConnection().runSQL(
+    "SELECT OBJNAME, OBJTYPE, OBJATTRIBUTE, OBJTEXT, VARCHAR(LAST_USED_TIMESTAMP) AS LAST_USED, DAYS_USED_COUNT, " +
+    "VARCHAR(CHANGE_TIMESTAMP) AS CHANGED, OBJSIZE, SOURCE_LIBRARY, SOURCE_FILE, SOURCE_MEMBER " +
+    `FROM TABLE(QSYS2.OBJECT_STATISTICS(?, '${typeList}', OBJECT_NAME => ?)) X ORDER BY OBJNAME, OBJTYPE FETCH FIRST ${limit} ROWS ONLY`,
+    { bindings: [lib, pattern] }
+  );
+  return rows.map((row) => ({
+    name: columnValue(row, "OBJNAME") ?? "",
+    type: columnValue(row, "OBJTYPE") ?? "",
+    attribute: columnValue(row, "OBJATTRIBUTE") ?? "",
+    text: columnValue(row, "OBJTEXT") ?? "",
+    lastUsed: columnValue(row, "LAST_USED") ?? "",
+    daysUsed: columnValue(row, "DAYS_USED_COUNT") ?? "",
+    changed: columnValue(row, "CHANGED") ?? "",
+    size: columnValue(row, "OBJSIZE") ?? "",
+    sourceLibrary: columnValue(row, "SOURCE_LIBRARY") ?? "",
+    sourceFile: columnValue(row, "SOURCE_FILE") ?? "",
+    sourceMember: columnValue(row, "SOURCE_MEMBER") ?? "",
+  }));
+}
+
+export interface FieldColumn {
+  library: string;
+  file: string;
+  sqlName: string;
+  column: string;
+  systemColumn: string;
+  type: string;
+  length: string;
+  scale: string;
+  text: string;
+}
+
+export interface FieldUsage {
+  field: string;
+  /** Files and tables with a column of that name. */
+  columns: FieldColumn[];
+  /** Source members whose text mentions the name. */
+  members: SourceMemberMatch[];
+  notes: string[];
+}
+
+/** Files one field lookup lists at most. */
+const MAX_FIELD_COLUMNS = 200;
+const FIELD_NAME = /^[A-Z0-9_$#@]{1,128}$/;
+
+/**
+ * Where a field is defined (a column of that system or SQL name in `libraries`, or in `file`) and
+ * which source members mention it. The text search is a plain substring search, so a name that
+ * is part of longer names finds those too.
+ */
+export async function findFieldUsage(
+  field: string,
+  options: { file?: string; libraries: string[]; memberLimit: number }
+): Promise<FieldUsage> {
+  const name = field.trim().toUpperCase();
+  if (!FIELD_NAME.test(name)) {
+    throw new Error(`Not a field name: ${field}`);
+  }
+  const libraries = options.libraries.map((library) => objectName(library, "library"));
+  const notes: string[] = [];
+  let columns: FieldColumn[] = [];
+  if (libraries.length > 0) {
+    const file = options.file === undefined ? undefined : objectName(options.file, "file");
+    const rows = await requireConnection().runSQL(
+      "SELECT SYSTEM_TABLE_SCHEMA, SYSTEM_TABLE_NAME, TABLE_NAME, COLUMN_NAME, SYSTEM_COLUMN_NAME, DATA_TYPE, LENGTH, " +
+      "NUMERIC_SCALE, COLUMN_TEXT FROM QSYS2.SYSCOLUMNS WHERE (SYSTEM_COLUMN_NAME = ? OR UPPER(COLUMN_NAME) = ?) " +
+      `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")})` + (file ? " AND SYSTEM_TABLE_NAME = ?" : "") +
+      ` ORDER BY SYSTEM_TABLE_SCHEMA, SYSTEM_TABLE_NAME FETCH FIRST ${MAX_FIELD_COLUMNS + 1} ROWS ONLY`,
+      { bindings: [name, name, ...libraries, ...(file ? [file] : [])] }
+    );
+    if (rows.length > MAX_FIELD_COLUMNS) {
+      notes.push(`Only the first ${MAX_FIELD_COLUMNS} files with the field are listed.`);
+    }
+    columns = rows.slice(0, MAX_FIELD_COLUMNS).map((row) => ({
+      library: columnValue(row, "SYSTEM_TABLE_SCHEMA") ?? "",
+      file: columnValue(row, "SYSTEM_TABLE_NAME") ?? "",
+      sqlName: columnValue(row, "TABLE_NAME") ?? "",
+      column: columnValue(row, "COLUMN_NAME") ?? "",
+      systemColumn: columnValue(row, "SYSTEM_COLUMN_NAME") ?? "",
+      type: columnValue(row, "DATA_TYPE") ?? "",
+      length: columnValue(row, "LENGTH") ?? "",
+      scale: columnValue(row, "NUMERIC_SCALE") ?? "",
+      text: columnValue(row, "COLUMN_TEXT") ?? "",
+    }));
+  }
+  const members = await searchSourceMembers("*", libraries, { text: name, limit: options.memberLimit });
+  if (members.length >= options.memberLimit) {
+    notes.push(`Stopped at ${options.memberLimit} members; narrow the libraries for the rest.`);
+  }
+  notes.push("Members are found by a text search for the name, so longer names that contain it count too.");
+  return { field: name, columns, members, notes };
+}
+
+export interface MemberLock {
+  /** number/user/name. */
+  job: string;
+  user: string;
+  number: string;
+  /** The locked member; empty for a lock on the file as a whole. */
+  member: string;
+  /** MEMBER, DATA or ACCESSPATH; empty for a file-level lock. */
+  lockType: string;
+  /** *EXCL, *EXCLRD, *SHRNUP, *SHRRD or *SHRUPD. */
+  state: string;
+  /** HELD, REQUESTED or WAITING. */
+  status: string;
+  scope: string;
+  program: string;
+}
+
+export interface MemberLocks {
+  locks: MemberLock[];
+  /** The job this connection runs SQL in, whose locks are its own. */
+  ownJob: string;
+  notes: string[];
+}
+
+/**
+ * The locks on a member (and on its file as a whole), from QSYS2.OBJECT_LOCK_INFO: which jobs
+ * have it open, for example in SEU or PDM. Column names from the IBM i 7.5 documentation; a
+ * release without the view or a column reports that as a note.
+ */
+export async function memberLocks(library: string, sourceFile: string, member: string): Promise<MemberLocks> {
+  const connection = requireConnection();
+  const lib = objectName(library, "library");
+  const file = objectName(sourceFile, "source file");
+  const mbr = objectName(member, "member");
+  const notes: string[] = [];
+  let ownJob = "";
+  try {
+    const [row] = await connection.runSQL("VALUES JOB_NAME");
+    ownJob = row ? String(Object.values(row)[0] ?? "").trim() : "";
+  } catch {
+    // The job name only labels the connection's own locks.
+  }
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = await connection.runSQL(
+      "SELECT JOB_NAME, JOB_USER, JOB_NUMBER, SYSTEM_TABLE_MEMBER, MEMBER_LOCK_TYPE, LOCK_STATE, LOCK_STATUS, LOCK_SCOPE, PROGRAM_NAME " +
+      "FROM QSYS2.OBJECT_LOCK_INFO WHERE SYSTEM_OBJECT_SCHEMA = ? AND SYSTEM_OBJECT_NAME = ? AND OBJECT_TYPE = '*FILE' " +
+      "AND (SYSTEM_TABLE_MEMBER = ? OR SYSTEM_TABLE_MEMBER IS NULL) ORDER BY SYSTEM_TABLE_MEMBER DESC, JOB_NAME",
+      { bindings: [lib, file, mbr] }
+    );
+  } catch (err) {
+    notes.push(`QSYS2.OBJECT_LOCK_INFO could not be read on this IBM i: ${errorMessage(err)}`);
+    return { locks: [], ownJob, notes };
+  }
+  const locks = rows.map((row) => ({
+    job: columnValue(row, "JOB_NAME") ?? "",
+    user: columnValue(row, "JOB_USER") ?? "",
+    number: columnValue(row, "JOB_NUMBER") ?? "",
+    member: columnValue(row, "SYSTEM_TABLE_MEMBER") ?? "",
+    lockType: columnValue(row, "MEMBER_LOCK_TYPE") ?? "",
+    state: columnValue(row, "LOCK_STATE") ?? "",
+    status: columnValue(row, "LOCK_STATUS") ?? "",
+    scope: columnValue(row, "LOCK_SCOPE") ?? "",
+    program: columnValue(row, "PROGRAM_NAME") ?? "",
+  }));
+  return { locks, ownJob, notes };
 }
 
 export interface JobLogMessage {

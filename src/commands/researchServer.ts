@@ -18,6 +18,9 @@ import {
   searchSourceMembers,
   serviceProgramExports,
   whereUsed,
+  findFieldUsage,
+  listObjects,
+  memberLocks,
 } from "../codeForIBMi";
 import { withDeadline } from "../deadline";
 import { errorMessage } from "../errors";
@@ -243,6 +246,9 @@ function createTools(ctx: CommandContext, whereUsedSetting: string): McpTool[] {
     runQuery: runReadOnlyQuery,
     listSpooledFiles,
     readSpooledFile,
+    listObjects,
+    findFieldUsage,
+    memberLocks,
     sourceDates: async (entry) => {
       const dates = await service.sourceDatesFor(entry);
       const baseline = dates && await service.baselineText(entry);

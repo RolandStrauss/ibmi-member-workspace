@@ -1,4 +1,4 @@
-import type { FileDescription, JobLogMessage, ObjectDescription, ServiceProgramExport, WhereUsedRow } from "./codeForIBMi";
+import type { FieldUsage, FileDescription, JobLogMessage, MemberLock, ObjectDescription, ServiceProgramExport, WhereUsedRow } from "./codeForIBMi";
 
 /**
  * Plain-text reports of what the research tools find, for a read-only editor document: a human's
@@ -111,10 +111,22 @@ function keyValues(values: Record<string, string>): string[] {
   return keys.map((key) => `${key.padEnd(width)}  ${values[key]}`);
 }
 
+const OBJECT_TYPE_NAMES: Record<string, string> = {
+  "*PGM": "Program", "*SRVPGM": "Service program", "*CMD": "Command", "*DTAARA": "Data area", "*DTAQ": "Data queue", "*JOBD": "Job description",
+};
+
+/** "Program", "Data area" and so on for an object type, or the type itself. */
+export function objectTypeName(type: string): string {
+  return OBJECT_TYPE_NAMES[type] ?? type;
+}
+
 export function objectDescriptionReport(object: ObjectDescription, system: string): string {
-  const lines = [`${object.type === "*SRVPGM" ? "Service program" : "Program"}: ${object.library}/${object.name} on ${system}`, "", ...keyValues(object.object)];
+  const lines = [`${objectTypeName(object.type)}: ${object.library}/${object.name} on ${system}`, "", ...keyValues(object.object)];
   if (object.program) {
     lines.push("", "Program information:", ...keyValues(object.program));
+  }
+  if (object.details) {
+    lines.push("", `${object.detailsSource ?? "Details"}:`, ...keyValues(object.details));
   }
   const table = (title: string, rows: Array<Record<string, string>> | undefined) => {
     if (!rows) {
@@ -162,4 +174,71 @@ export function jobLogReport(log: { job: string; messages: readonly JobLogMessag
 export function objectTypeForSourceType(extension: string): "*FILE" | undefined {
   const type = extension.toUpperCase();
   return ["PF", "LF", "DSPF", "PRTF", "ICFF", "TABLE", "VIEW", "INDEX", "ALIAS"].includes(type) ? "*FILE" : undefined;
+}
+
+/** One line about the jobs that hold a member open, for a notification: "Also open in job …". */
+export function summarizeLocks(locks: readonly MemberLock[]): string {
+  const jobs = [...new Map(locks.map((lock) => [lock.job, lock])).values()];
+  if (jobs.length === 0) {
+    return "";
+  }
+  const describe = (lock: MemberLock) => `${lock.job} (${lock.state}${lock.member ? "" : ", whole file"}${lock.status === "HELD" ? "" : `, ${lock.status.toLowerCase()}`})`;
+  return `Also open in job${jobs.length === 1 ? "" : "s"} ${jobs.map(describe).join("; ")}.`;
+}
+
+export function memberLocksReport(
+  input: { library: string; sourceFile: string; memberName: string; system: string; locks: readonly MemberLock[]; ownJob: string; notes: readonly string[] }
+): string {
+  const member = `${input.library}/${input.sourceFile}(${input.memberName})`;
+  const lines = [`Locks on ${member} on ${input.system}`, ""];
+  if (input.locks.length === 0) {
+    lines.push(input.notes.length > 0 ? "No locks could be read." : "No job holds a lock on the member or its file.");
+  } else {
+    lines.push(`${input.locks.length} lock(s):`, "", ...textTable(
+      ["Job", "User", "On", "Type", "State", "Status", "Scope", "Program"],
+      input.locks.map((lock) => [
+        lock.job === input.ownJob ? `${lock.job} (this connection)` : lock.job,
+        lock.user,
+        lock.member ? `member ${lock.member}` : "the file",
+        lock.lockType,
+        lock.state,
+        lock.status,
+        lock.scope,
+        lock.program,
+      ])
+    ));
+    lines.push("", "*SHRNUP or *EXCLRD on the member usually means it is open in an editor (SEU, PDM, RDi, or Code for IBM i).");
+  }
+  if (input.notes.length > 0) {
+    lines.push("", ...input.notes.map((note) => `Note: ${note}`));
+  }
+  return lines.join("\n") + "\n";
+}
+
+export function fieldUsageReport(usage: FieldUsage, system: string, libraries: readonly string[]): string {
+  const lines = [`Field ${usage.field} on ${system}`, `Libraries searched: ${libraries.join(", ") || "none"}`, ""];
+  if (usage.columns.length === 0) {
+    lines.push("No file or table in these libraries has a column of that name.");
+  } else {
+    lines.push(`Defined in ${usage.columns.length} file(s):`, "", ...textTable(
+      ["Library", "File", "SQL name", "Column", "System name", "Type", "Length", "Text"],
+      usage.columns.map((column) => [
+        column.library, column.file, column.sqlName !== column.file ? column.sqlName : "", column.column, column.systemColumn,
+        column.type, column.scale && column.scale !== "0" ? `${column.length},${column.scale}` : column.length, column.text,
+      ])
+    ));
+  }
+  lines.push("");
+  if (usage.members.length === 0) {
+    lines.push("No source member in these libraries mentions it.");
+  } else {
+    lines.push(`Mentioned in ${usage.members.length} source member(s):`, "", ...textTable(
+      ["Library", "Source file", "Member", "Type", "Text"],
+      usage.members.map((member) => [member.library, member.sourceFile, member.member, member.sourceType, member.text ?? ""])
+    ));
+  }
+  if (usage.notes.length > 0) {
+    lines.push("", ...usage.notes.map((note) => `Note: ${note}`));
+  }
+  return lines.join("\n") + "\n";
 }

@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
 import { ensureCheckoutFolder } from "../checkoutFolder";
-import { getSystemName, listSourceFileMembers } from "../codeForIBMi";
+import { getSystemName, listSourceFileMembers,
+  memberLocks,
+} from "../codeForIBMi";
 import { DOWNLOAD_CONCURRENCY, mapWithLimit } from "../concurrency";
 import { CheckoutCancelledError, errorMessage } from "../errors";
 import {
@@ -14,7 +16,11 @@ import {
 } from "../memberInfo";
 import { countLocalChanges, saveDirtyLocalFiles } from "../prompts";
 import { ReferenceCopyResult, bringReferenceCopies } from "../referenceCopies";
-import { ChangeManagementOrigin, CheckedOutMember, buildCheckoutId, systemKey } from "../types";
+import { ChangeManagementOrigin, CheckedOutMember, buildCheckoutId, systemKey,
+  isReferenceCopy,
+  formatMemberPath,
+} from "../types";
+import { summarizeLocks } from "../researchReport";
 import { CommandContext } from "./context";
 import { suggestDependencies } from "./dependencies";
 import { ensureWorkItemForCheckout } from "./git";
@@ -77,6 +83,7 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
                 }
               );
             void suggestDependencies(ctx, entry);
+            noticeMemberLocks(ctx, entry);
           } catch (err) {
             if (!(err instanceof CheckoutCancelledError)) {
               log.appendLine(`Checkout error: ${errorMessage(err)}`);
@@ -394,4 +401,26 @@ export function sourceFileInfoOf(node: BrowserNode | undefined): SourceFileInfo 
 /** The member an Object Browser node stands for. */
 export function memberInfoOf(node: BrowserNode | undefined): MemberInfo | undefined {
   return extractMemberInfo(node, resourceUriOf(node));
+}
+
+/**
+ * After a checkout, says if another job has the member open (in SEU, PDM or another editor): an
+ * upload would then fail, or overwrite what that person is editing. Best effort, never in the way.
+ */
+function noticeMemberLocks(ctx: CommandContext, entry: CheckedOutMember): void {
+  if (isReferenceCopy(entry)) {
+    return;
+  }
+  memberLocks(entry.library, entry.sourceFile, entry.memberName)
+    .then(async ({ locks, ownJob }) => {
+      const others = locks.filter((lock) => lock.job !== ownJob && lock.member);
+      if (others.length === 0) {
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(`${formatMemberPath(entry)}: ${summarizeLocks(others)}`, "Show Locks");
+      if (choice === "Show Locks") {
+        await vscode.commands.executeCommand("ibmi-member-workspace.research.memberLocks", { kind: "member", entry });
+      }
+    })
+    .catch((err) => ctx.log.appendLine(`[checkout] Could not read the locks on ${formatMemberPath(entry)}: ${errorMessage(err)}`));
 }

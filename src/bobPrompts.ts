@@ -140,7 +140,8 @@ function deepDivePrompt(these: string, one: boolean, lines: string[], listed: re
     "Use the ibmi-member-workspace tools: read_member_source for the source, find_member_dependencies for what it uses " +
       "(read its copybooks when you need them), find_where_used for its callers or the programs that use a file, " +
       "describe_file for file and table layouts, describe_object for a program's attributes and what is bound into it, " +
-      "list_service_program_exports for service programs, and compare_checkout for what changed in a member checked out for change.",
+      "list_service_program_exports for service programs, list_objects for what a library holds, find_field_usage for where a field " +
+      "is defined and used, and compare_checkout for what changed in a member checked out for change.",
     "",
     `For ${one ? "a program" : "each program"}, cover:`,
     "1. Its purpose, and where it fits: a tree of its callers and what it calls.",

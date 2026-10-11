@@ -212,6 +212,28 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
       return { lines: lines.slice(startLine - 1, endLine), totalLines: lines.length };
     },
     sourceDates: async () => undefined,
+    listObjects: async (library, { types, namePattern, limit }) => library === "PRODOBJ"
+      ? [
+        { name: "ORDENT", type: "*PGM", attribute: "RPGLE", text: "Order entry", lastUsed: "2026-10-01 10:00:00", daysUsed: "12", changed: "2026-09-01 10:00:00", size: "65536", sourceLibrary: "PRODSRC", sourceFile: "QRPGLESRC", sourceMember: "ORDENT" },
+        { name: "CUSTMAST", type: "*FILE", attribute: "PF", text: "Customers", lastUsed: "", daysUsed: "0", changed: "", size: "", sourceLibrary: "", sourceFile: "", sourceMember: "" },
+      ].filter((o) => (!types || types.includes(o.type)) && (!namePattern || namePattern === "*ALL" || o.name.startsWith(namePattern.replace("*", "")))).slice(0, limit)
+      : [],
+    findFieldUsage: async (field, { libraries, memberLimit }) => ({
+      field,
+      columns: libraries.includes("PRODDTA") ? [{ library: "PRODDTA", file: "CUSTMAST", sqlName: "CUSTOMER_MASTER", column: "CUSTNO", systemColumn: "CUSTNO", type: "NUMERIC", length: "7", scale: "0", text: "Customer number" }] : [],
+      members: [{ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", sourceType: "SQLRPGLE", text: "Order entry", lastChanged: "" }].slice(0, memberLimit),
+      notes: [],
+    }),
+    memberLocks: async (library, sourceFile, member) => ({
+      ownJob: "111111/DEV/QZDASOINIT",
+      locks: member === "ORDENT"
+        ? [
+          { job: "111111/DEV/QZDASOINIT", user: "DEV", number: "111111", member: "ORDENT", lockType: "MEMBER", state: "*SHRRD", status: "HELD", scope: "JOB", program: "" },
+          { job: "123456/JSMITH/QPADEV0001", user: "JSMITH", number: "123456", member: "ORDENT", lockType: "MEMBER", state: "*SHRNUP", status: "HELD", scope: "JOB", program: "QSEU" },
+        ]
+        : [],
+      notes: [`${library}/${sourceFile}`].filter(() => false),
+    }),
     ...overrides,
   };
   return { io, checkouts, brought };
@@ -242,6 +264,9 @@ describe("research tools", () => {
       "sample_file_data",
       "sql_query",
       "read_spool_file",
+      "list_objects",
+      "find_field_usage",
+      "list_member_locks",
     ]);
     for (const name of names) {
       assert.doesNotMatch(name, /upload|merge|write|edit|delete|discard|compile|run/);
@@ -389,7 +414,7 @@ describe("research tools", () => {
     assert.equal(result.type, "*PGM");
     assert.equal((result.modules as unknown[]).length, 2);
     await assert.rejects(tool(createResearchTools(io), "describe_object").call({ name: "ORDENT", library: "OTHERLIB" }), /No program or service program named ORDENT in OTHERLIB/);
-    await assert.rejects(tool(createResearchTools(io), "describe_object").call({ name: "ORDENT", objectType: "*FILE" }), /must be \*PGM or \*SRVPGM/);
+    await assert.rejects(tool(createResearchTools(io), "describe_object").call({ name: "ORDENT", objectType: "*FILE" }), /must be one of \*PGM, \*SRVPGM/);
   });
 
   it("reads the job log with bounded size and a validated job name", async () => {
@@ -630,5 +655,75 @@ describe("read_member_source with includeDates", () => {
     const asked = await tool(tools, "read_member_source").call({ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", includeDates: true }) as { dates?: unknown; datesNote: string };
     assert.equal(asked.dates, undefined);
     assert.match(asked.datesNote, /ibmi-member-workspace\.sourceDates/);
+  });
+});
+
+describe("list_objects", () => {
+  it("lists a library's objects, narrowed by type and generic name", async () => {
+    const tools = createResearchTools(fakeIo().io);
+    const all = await tool(tools, "list_objects").call({ library: "prodobj" }) as { library: string; objects: Array<{ name: string }>; note?: string };
+    assert.equal(all.library, "PRODOBJ");
+    assert.deepEqual(all.objects.map((o) => o.name), ["ORDENT", "CUSTMAST"]);
+    assert.equal(all.note, undefined);
+    const programs = await tool(tools, "list_objects").call({ library: "PRODOBJ", objectTypes: ["*pgm"], namePattern: "ord*" }) as { objects: Array<{ name: string }> };
+    assert.deepEqual(programs.objects.map((o) => o.name), ["ORDENT"]);
+    const capped = await tool(tools, "list_objects").call({ library: "PRODOBJ", limit: 1 }) as { objects: unknown[]; note?: string };
+    assert.equal(capped.objects.length, 1);
+    assert.match(capped.note ?? "", /Stopped at 1 objects/);
+  });
+
+  it("refuses odd types and names", async () => {
+    const tools = createResearchTools(fakeIo().io);
+    await assert.rejects(tool(tools, "list_objects").call({ library: "PRODOBJ", objectTypes: ["PGM"] }), /objectTypes/);
+    await assert.rejects(tool(tools, "list_objects").call({ library: "PRODOBJ", namePattern: "A*B" }), /namePattern/);
+    await assert.rejects(tool(tools, "list_objects").call({}), /"library"/);
+  });
+});
+
+describe("find_field_usage", () => {
+  it("returns the files defining the field and the members mentioning it, in the searched libraries", async () => {
+    const tools = createResearchTools(fakeIo().io);
+    const usage = await tool(tools, "find_field_usage").call({ field: "custno", libraries: ["PRODDTA", "PRODSRC"] }) as {
+      field: string; columns: Array<{ file: string }>; members: Array<{ member: string }>; librariesSearched: string[];
+    };
+    assert.equal(usage.field, "CUSTNO");
+    assert.deepEqual(usage.columns.map((c) => c.file), ["CUSTMAST"]);
+    assert.deepEqual(usage.members.map((m) => m.member), ["ORDENT"]);
+    assert.deepEqual(usage.librariesSearched, ["PRODDTA", "PRODSRC"]);
+    await assert.rejects(tool(tools, "find_field_usage").call({ field: "cust no" }), /"field"/);
+  });
+});
+
+describe("list_member_locks", () => {
+  it("lists the locks, marking this connection's own", async () => {
+    const tools = createResearchTools(fakeIo().io);
+    const result = await tool(tools, "list_member_locks").call({ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ordent" }) as {
+      member: string; locks: Array<{ job: string; thisConnection: boolean; state: string }>;
+    };
+    assert.equal(result.member, "PRODSRC/QRPGLESRC(ORDENT)");
+    assert.deepEqual(result.locks.map((l) => [l.job, l.thisConnection, l.state]), [
+      ["111111/DEV/QZDASOINIT", true, "*SHRRD"],
+      ["123456/JSMITH/QPADEV0001", false, "*SHRNUP"],
+    ]);
+    const none = await tool(tools, "list_member_locks").call({ library: "PRODSRC", sourceFile: "QRPGLESRC", member: "OTHER" }) as { locks: unknown[] };
+    assert.deepEqual(none.locks, []);
+  });
+});
+
+describe("describe_object for other object types", () => {
+  it("accepts the other types and passes the data-samples permission through", async () => {
+    const calls: unknown[] = [];
+    const { io } = fakeIo({
+      allowDataSamples: () => true,
+      describeObject: async (name, libraries, types, options) => {
+        calls.push([name, libraries, types, options]);
+        return { library: "PRODOBJ", name, type: "*DTAARA", object: {}, details: { DATA_AREA_TYPE: "*CHAR", DATA_AREA_VALUE: "x" }, detailsSource: "QSYS2.DATA_AREA_INFO", notes: [] };
+      },
+    });
+    const tools = createResearchTools(io);
+    const result = await tool(tools, "describe_object").call({ name: "CTLDTA", library: "PRODOBJ", objectType: "*dtaara" }) as { details: Record<string, string> };
+    assert.deepEqual(calls, [["CTLDTA", ["PRODOBJ"], ["*DTAARA"], { includeValues: true }]]);
+    assert.equal(result.details.DATA_AREA_VALUE, "x");
+    await assert.rejects(tool(tools, "describe_object").call({ name: "X", objectType: "*FILE" }), /objectType/);
   });
 });
