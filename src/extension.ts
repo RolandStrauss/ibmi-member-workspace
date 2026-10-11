@@ -8,6 +8,7 @@ import { getSystemName, onConnectionChange, resetWhereUsedSnapshots } from "./co
 import { errorMessage } from "./errors";
 import { ProviderAvailabilityCache } from "./dependencySources";
 import { LocalFileWatcher } from "./localFileWatcher";
+import { REPORT_SCHEME, ReportProvider } from "./reportProvider";
 import { registerSourceDiagnostics } from "./sourceDiagnostics";
 import { CheckoutDecorations } from "./checkoutDecorations";
 import { extractMemberInfo } from "./memberInfo";
@@ -216,6 +217,9 @@ export async function activate(
     })
   );
 
+  const reports = new ReportProvider();
+  context.subscriptions.push(reports, vscode.workspace.registerTextDocumentContentProvider(REPORT_SCHEME, reports));
+
   const ctx: CommandContext = {
     context,
     service,
@@ -227,6 +231,7 @@ export async function activate(
     refreshGitStatusBar,
     log,
     dependencyAvailability,
+    reports,
   };
   registerCheckoutFolderCommands(ctx);
   registerCheckoutCommands(ctx);

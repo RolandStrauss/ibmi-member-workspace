@@ -5,6 +5,7 @@ import { ProviderAvailabilityCache } from "../dependencySources";
 import { GitService } from "../gitService";
 import { LocalFileWatcher } from "../localFileWatcher";
 import { MergeHandler } from "../mergeHandler";
+import { ReportProvider } from "../reportProvider";
 import { TreeItemType } from "../types";
 
 /** Everything command handlers need, created once in `activate`. */
@@ -20,4 +21,6 @@ export interface CommandContext {
   log: vscode.OutputChannel;
   /** Which dependency providers work on each system, checked once per connection. */
   dependencyAvailability: ProviderAvailabilityCache;
+  /** Read-only report documents (research results, listings, diagrams). */
+  reports: ReportProvider;
 }

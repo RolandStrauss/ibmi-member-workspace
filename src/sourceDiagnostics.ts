@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "./checkoutService";
+import { checkoutOfDocument } from "./documentCheckout";
 import { SourceLayout, SourceProblem, codePointLabel, describeProblem, sourceProblems } from "./sourceCheck";
-import { CheckedOutMember, isReferenceCopy } from "./types";
+import { CheckedOutMember } from "./types";
 
 const DIAGNOSTIC_SOURCE = "IBM i Member Workspace";
 /** Problems shown per file: a file pasted with typographic quotes throughout can have thousands. */
@@ -94,11 +95,7 @@ export async function showSourceProblems(entry: CheckedOutMember, first?: Source
 }
 
 function editableCheckout(service: CheckoutService, document: vscode.TextDocument): CheckedOutMember | undefined {
-  if (document.uri.scheme !== "file") {
-    return undefined;
-  }
-  const entry = service.findEntryByLocalPath(document.uri.fsPath);
-  return entry && !isReferenceCopy(entry) ? entry : undefined;
+  return checkoutOfDocument(service, document, { editableOnly: true });
 }
 
 function rangeOf(problem: SourceProblem): vscode.Range {

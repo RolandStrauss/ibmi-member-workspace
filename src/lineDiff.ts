@@ -35,19 +35,7 @@ export function unifiedDiff(a: string, b: string, options: DiffOptions = {}): Li
   const { aLabel = "a", bLabel = "b", context = 3, maxEdits = 2000 } = options;
   const aLines = splitLines(canonicalMemberText(a));
   const bLines = splitLines(canonicalMemberText(b));
-
-  let prefix = 0;
-  while (prefix < aLines.length && prefix < bLines.length && aLines[prefix] === bLines[prefix]) {
-    prefix++;
-  }
-  let suffix = 0;
-  while (
-    suffix < aLines.length - prefix &&
-    suffix < bLines.length - prefix &&
-    aLines[aLines.length - 1 - suffix] === bLines[bLines.length - 1 - suffix]
-  ) {
-    suffix++;
-  }
+  const { prefix, suffix } = commonEnds(aLines, bLines);
   const aMiddle = aLines.slice(prefix, aLines.length - suffix);
   const bMiddle = bLines.slice(prefix, bLines.length - suffix);
   if (aMiddle.length === 0 && bMiddle.length === 0) {
@@ -74,6 +62,70 @@ export function unifiedDiff(a: string, b: string, options: DiffOptions = {}): Li
     text: [`--- ${aLabel}`, `+++ ${bLabel}`, ...hunks(ops, context)].join("\n"),
     truncated,
   };
+}
+
+export interface LineMap {
+  /** For each line of `current`, the index of the same line in `baseline`, or undefined when it was added or changed. */
+  map: Array<number | undefined>;
+  /** True when the texts differ by more than `maxEdits` lines; the whole differing middle is then unmapped. */
+  truncated: boolean;
+}
+
+/**
+ * Which lines of `current` are unchanged from `baseline`, and where they were, so per-line facts
+ * about the baseline (its source dates) can be shown on the current text. Both texts are compared
+ * as the IBM i stores them, which only drops trailing blank lines and never shifts the others.
+ */
+export function lineMap(baseline: string, current: string, maxEdits = 2000): LineMap {
+  const aLines = splitLines(canonicalMemberText(baseline));
+  const bLines = splitLines(canonicalMemberText(current));
+  const { prefix, suffix } = commonEnds(aLines, bLines);
+  const map: Array<number | undefined> = new Array<number | undefined>(bLines.length).fill(undefined);
+  for (let i = 0; i < prefix; i++) {
+    map[i] = i;
+  }
+  for (let i = 0; i < suffix; i++) {
+    map[bLines.length - 1 - i] = aLines.length - 1 - i;
+  }
+  const aMiddle = aLines.slice(prefix, aLines.length - suffix);
+  const bMiddle = bLines.slice(prefix, bLines.length - suffix);
+  if (aMiddle.length === 0 && bMiddle.length === 0) {
+    return { map, truncated: false };
+  }
+  const ops = myers(aMiddle, bMiddle, maxEdits);
+  if (!ops) {
+    return { map, truncated: true };
+  }
+  let a = prefix;
+  let b = prefix;
+  for (const op of ops) {
+    if (op.kind === "=") {
+      map[b] = a;
+      a++;
+      b++;
+    } else if (op.kind === "-") {
+      a++;
+    } else {
+      b++;
+    }
+  }
+  return { map, truncated: false };
+}
+
+function commonEnds(aLines: readonly string[], bLines: readonly string[]): { prefix: number; suffix: number } {
+  let prefix = 0;
+  while (prefix < aLines.length && prefix < bLines.length && aLines[prefix] === bLines[prefix]) {
+    prefix++;
+  }
+  let suffix = 0;
+  while (
+    suffix < aLines.length - prefix &&
+    suffix < bLines.length - prefix &&
+    aLines[aLines.length - 1 - suffix] === bLines[bLines.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  return { prefix, suffix };
 }
 
 function splitLines(text: string): string[] {

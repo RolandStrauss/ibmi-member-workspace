@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { unifiedDiff } from "../lineDiff";
+import { lineMap, unifiedDiff } from "../lineDiff";
 
 const lines = (...items: string[]) => items.join("\n");
 
@@ -67,5 +67,36 @@ describe("unifiedDiff", () => {
     const diff = unifiedDiff("", lines("a", "b"), { context: 0 });
     assert.equal(diff.added, 2);
     assert.equal(diff.text, lines("--- a", "+++ b", "@@ -0,0 +1,2 @@", "+a", "+b"));
+  });
+});
+
+describe("lineMap", () => {
+  it("maps every line of identical texts to itself, as the IBM i stores them", () => {
+    assert.deepEqual(lineMap("a\r\nb  \r\n\r\n", "a\nb"), { map: [0, 1], truncated: false });
+  });
+
+  it("keeps the baseline index for unchanged lines around an insertion and a change", () => {
+    const { map, truncated } = lineMap(lines("1", "2", "3", "4"), lines("1", "new", "2", "THREE", "4"));
+    assert.equal(truncated, false);
+    assert.deepEqual(map, [0, undefined, 1, undefined, 3]);
+  });
+
+  it("shifts the lines after a deletion", () => {
+    assert.deepEqual(lineMap(lines("a", "b", "c", "d"), lines("a", "c", "d")).map, [0, 2, 3]);
+  });
+
+  it("leaves an empty current text with no lines, and maps nothing from an empty baseline", () => {
+    assert.deepEqual(lineMap("a\nb", "").map, []);
+    assert.deepEqual(lineMap("", "a\nb").map, [undefined, undefined]);
+  });
+
+  it("maps only the common ends when the texts differ too much", () => {
+    const base = ["same", ...Array.from({ length: 10 }, (_, i) => `b${i}`), "end"].join("\n");
+    const current = ["same", ...Array.from({ length: 10 }, (_, i) => `c${i}`), "end"].join("\n");
+    const { map, truncated } = lineMap(base, current, 2);
+    assert.equal(truncated, true);
+    assert.equal(map[0], 0);
+    assert.equal(map[11], 11);
+    assert.ok(map.slice(1, 11).every((line) => line === undefined));
   });
 });

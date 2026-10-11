@@ -62,19 +62,36 @@ export function getSystemName(): string | undefined {
   return getConnection()?.currentHost;
 }
 
+export type ConnectionEvent = "connected" | "disconnected";
+
+/**
+ * Code for IBM i's connect and disconnect events, subscribed to once (each context/name pair must be
+ * unique there) and fanned out to every listener here.
+ */
+const connectionEvents = new vscode.EventEmitter<ConnectionEvent>();
+let connectionEventsSubscribed = false;
+
 /** Runs `listener` whenever Code for IBM i connects or disconnects. */
 export function onConnectionChange(
   context: vscode.ExtensionContext,
-  listener: () => void
+  listener: (event: ConnectionEvent) => void
 ): void {
+  subscribeConnectionEvents(context);
+  context.subscriptions.push(connectionEvents.event(listener));
+}
+
+function subscribeConnectionEvents(context: vscode.ExtensionContext): void {
+  if (connectionEventsSubscribed) {
+    return;
+  }
   const instance = getInstance();
   if (!instance) {
     return;
   }
-
   try {
-    instance.subscribe(context, "connected", "Refresh checked out members (connected)", listener);
-    instance.subscribe(context, "disconnected", "Refresh checked out members (disconnected)", listener);
+    instance.subscribe(context, "connected", "IBM i Member Workspace (connected)", () => connectionEvents.fire("connected"));
+    instance.subscribe(context, "disconnected", "IBM i Member Workspace (disconnected)", () => connectionEvents.fire("disconnected"));
+    connectionEventsSubscribed = true;
   } catch {
     // Code for i API may vary — connection events are optional
   }
@@ -251,11 +268,16 @@ function requireConnection(): IBMi {
 /** How long a CL command such as a change-management checkout may run before the extension stops waiting. */
 const COMMAND_TIMEOUT_MS = 5 * 60_000;
 
+/** The IBM i's clock as an SQL timestamp string, or "" when it can't be read. */
+export async function currentTimestamp(): Promise<string> {
+  const [row] = await requireConnection().runSQL("VALUES VARCHAR(CURRENT TIMESTAMP)").catch(() => []);
+  return row ? String(Object.values(row)[0] ?? "") : "";
+}
+
 export async function runClCommand(command: string): Promise<void> {
   const connection = requireConnection();
   // The IBM i's clock, to read only the job log messages this command adds.
-  const [started] = await connection.runSQL("VALUES VARCHAR(CURRENT TIMESTAMP)").catch(() => []);
-  const since = started ? String(Object.values(started)[0] ?? "") : "";
+  const since = await currentTimestamp();
   let result: Awaited<ReturnType<typeof connection.runCommand>>;
   try {
     result = await withDeadline(connection.runCommand({ command, environment: "ile" }), {

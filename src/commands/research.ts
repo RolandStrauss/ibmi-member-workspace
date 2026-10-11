@@ -37,7 +37,6 @@ import { searchLibraries } from "./dependencies";
  * document, so it can be searched and copied. The same IBM i queries serve the agents' tools.
  */
 
-const SCHEME = "ibmi-research";
 const OBJECT_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/i;
 const JOB_NAME = /^\d{6}\/[A-Z0-9_$#@]{1,10}\/[A-Z0-9_$#@]{1,10}$/i;
 /** Messages Show Job Log reads. */
@@ -49,44 +48,8 @@ interface ResearchTarget {
   sourceType?: string;
 }
 
-/** Reports shown as read-only documents; each is kept until its document closes. */
-class ReportProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {
-  private readonly reports = new Map<string, string>();
-  private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
-  readonly onDidChange = this.emitter.event;
-  private counter = 0;
-  private readonly subscription: vscode.Disposable;
-
-  constructor() {
-    this.subscription = vscode.workspace.onDidCloseTextDocument((doc) => {
-      if (doc.uri.scheme === SCHEME) {
-        this.reports.delete(doc.uri.toString());
-      }
-    });
-  }
-
-  provideTextDocumentContent(uri: vscode.Uri): string {
-    return this.reports.get(uri.toString()) ?? "This report was closed. Run the command again.\n";
-  }
-
-  async open(title: string, text: string): Promise<void> {
-    const file = title.replace(/[\\/:*?"<>|]/g, "_");
-    const uri = vscode.Uri.from({ scheme: SCHEME, path: `/${file}.txt`, query: String(++this.counter) });
-    this.reports.set(uri.toString(), text);
-    const doc = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(doc, { preview: false });
-  }
-
-  dispose(): void {
-    this.subscription.dispose();
-    this.emitter.dispose();
-  }
-}
-
 export function registerResearchCommands(ctx: CommandContext): void {
-  const { context } = ctx;
-  const reports = new ReportProvider();
-  context.subscriptions.push(reports, vscode.workspace.registerTextDocumentContentProvider(SCHEME, reports));
+  const { context, reports } = ctx;
 
   /** A command on members (or a typed name): the handler for `run`. */
   const onMembers = (
