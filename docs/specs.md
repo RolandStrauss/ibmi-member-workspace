@@ -346,6 +346,108 @@ Agents could see relationships and source, but not a program's attributes, why a
 - `src/test/refreshRun.test.ts` (tally of every status and errors, at most N at once, cancel starts nothing more), `src/test/localPath.test.ts` (`checkoutFilePath`), `manifest.test.ts` (VSIX holds `dist/extension.js` only, `main`).
 - Manual: F5 from the bundled build (activation, a checkout, an upload, the research server, a checkpoint); Refresh All on a few hundred members.
 
+### 22. Checkout badges in the Object Browser (shipped in 1.8.13)
+
+- `statusDecorations.ts` (vscode-free): `browserDecorationFor(entry, workItem)` gives `decorationFor`'s badge and color, or `CO` for a member in sync, with a tooltip naming the work item ("Checked out here (work item X): …", "Reference copy here …").
+- `checkoutDecorations.ts` decorates `member:` URIs too (Code for IBM i's Object Browser items carry `getMemberUri(member)` as `resourceUri`): `extractMemberInfo({}, uri)` and `findEntry` on the connected system; nothing while disconnected.
+
+**Validation**
+- `src/test/statusDecorations.test.ts` (`browserDecorationFor`: in sync, modified, reference). Manual: the Object Browser next to Checked Out Members in the dev host.
+
+### 23. New Member and Copy Member As (shipped in 1.8.13)
+
+- `memberCreate.ts` (vscode-free): `memberTextProblem` (50 characters, no control characters), `newMemberProblem` (`memberNameProblem` on the names and the source type), `clText` (apostrophes doubled), `addMemberCommand` (`ADDPFM FILE(L/F) MBR(M) SRCTYPE(T) TEXT('…')`, TEXT left out when blank), `copySourceCommand` (`CPYSRCF … MBROPT(*REPLACE)`, keeping sequence numbers and dates), `copyMemberPlan` (ADDPFM first, so the chosen type and text win, then CPYSRCF).
+- `commands/memberCreate.ts`: `newMember` (an Object Browser source file prefills library and file) and `copyMemberAs` (a checkout prefills library, file and type); input boxes with validation; `sourceFileLayout` must find the file (a source physical file) and `memberChangeStamps` must not know the name; the commands are shown in a modal before `runClCommand` runs them; then `checkoutMember(…, { redownloadBehavior: "force" })`. When ADDPFM ran and CPYSRCF failed, the message says the member was added but is empty.
+- Manifest: both commands; `newMember` in the Checked Out Members title bar's overflow (`1_members@1`), on `SPF` Object Browser items (`ibmiCheckout@2`) and in the palette while connected; `copyMemberAs` on a tree member (`5_util@2`), in the member submenu (`6_util@3`) and in the palette while a checkout is active.
+
+**Validation**
+- `src/test/memberCreate.test.ts` (commands, quoting, blank text, plan order, every refusal). Manual: New Member from the Object Browser and Copy Member As from a checkout, both cancelled at the modal, then run (verified on first live call: `ADDPFM`/`CPYSRCF` written from the CL reference).
+
+### 24. Adopt Checkout Folder, Export and Import Work Item (shipped in 1.8.13)
+
+- `adoptFolder.ts` (vscode-free): `scanCheckoutFolder(root, systemFolder, system, io, trackedIds)` walks exactly `<LIB>/<SRCFILE>/<MEMBER>.<EXT>` through an injected `FolderIo` (entries by kind; links are never followed; dot names, invalid names and files without an extension are skipped and counted), leaves out tracked ids, and stops at `MAX_ADOPT_CANDIDATES` (2000) with `truncated`. Read-only files (`isReadOnly`) become reference copies.
+- `CheckoutService.adoptMember(parts, { reference, system, signal, deferCheckpointTo })`: validates the name, refuses a tracked member, builds the path with `checkoutFilePath` (inside the root, no link), reads the local text, downloads the IBM i's copy (a member gone from the IBM i, by `memberChangeStamps`, is adopted as `remote-missing` with the local text as baseline), sets the baseline to the remote text (`classifyStatus(local, remote, remote)` → in sync or modified), keeps source dates, marks reference copies read-only, pushes the entry and persists. The local file is never written.
+- `commands/adoptFolder.ts`: connected only; `sanitizeSystemName(host)` names the system folder; a multi-select quick pick (all preselected, read-only files labelled "→ reference copy"); the batch pattern of `checkoutMembersBatch` (cancellable progress, `AbortController`, `runBatch`, `mapWithLimit(DOWNLOAD_CONCURRENCY)`, one checkpoint); a summary with counts.
+- `workItemExport.ts` (vscode-free): `exportWorkItem` (format `ibmi-member-workspace/work-item`, version 1, sorted members with `kind: "reference"` where it applies, no paths or hashes), `exportFileName`, `parseWorkItemExport` (format, version, ≤ 5000 members, every name through `memberNameProblem`), `importPlan` (refuses another or no connected system; splits members for change from reference copies).
+- `commands/workItemExport.ts`: `exportWorkItem` (save dialog) and `importWorkItem` (open dialog, 2 MB at most, modal confirmation, then `checkoutMembersBatch` for each kind).
+- Manifest: three commands in the title bar's overflow (`2_folder@1..3`) and the palette while connected.
+
+**Validation**
+- `src/test/adoptFolder.test.ts` (layout, skips, tracked, read-only, missing folder, limit), `src/test/workItemExport.test.ts` (round trip, every refusal, system check). Manual: adopt a folder copied from another workspace; export, then import on the same system.
+
+### 25. Member locks (shipped in 1.8.13)
+
+- `codeForIBMi.ts` `memberLocks(library, file, member)`: `QSYS2.OBJECT_LOCK_INFO` (`SYSTEM_OBJECT_SCHEMA`, `SYSTEM_OBJECT_NAME`, `OBJECT_TYPE = '*FILE'`, `SYSTEM_TABLE_MEMBER = ? OR IS NULL`, bound), with `JOB_NAME`, `JOB_USER`, `JOB_NUMBER`, `MEMBER_LOCK_TYPE`, `LOCK_STATE`, `LOCK_STATUS`, `LOCK_SCOPE`, `PROGRAM_NAME`; the connection's own job from `VALUES JOB_NAME`; a release without the view reports a note instead of failing.
+- `researchReport.ts`: `summarizeLocks` (one line naming the other jobs), `memberLocksReport` (table, own job marked, a hint about *SHRNUP/*EXCLRD).
+- Surfaces: `research.memberLocks` ("Show Member Locks…", `research@7`; from the palette `LIBRARY/SOURCEFILE(MEMBER)` is accepted, `ResearchTarget` carries the library and file), a best-effort notice after a single checkout (`commands/checkout.ts` `noticeMemberLocks`, never blocking the checkout), and the `list_member_locks` tool (§31).
+
+**Validation**
+- `src/test/researchReport.test.ts` (summary, report, none, note), `src/test/bobMcpTools.test.ts` (`list_member_locks`). The column names come from the IBM i 7.5 documentation and were not run against an IBM i before release; the first call on a real system validates them.
+
+### 26. Source dates locally (shipped in 1.8.13)
+
+- `codeForIBMi.ts` `downloadSourceDates`: `CREATE OR REPLACE ALIAS QTEMP.IMWDATES FOR "L"."F"("M")`, `SELECT SRCDAT … ORDER BY SRCSEQ`, `DROP ALIAS`, under `exclusive()` (QTEMP is shared with the outfile commands); each value as six digits, "0" for none.
+- `dateStore.ts` (vscode-free): `DateStore` over the `BaselineFiles` adapter in `dates/<sha256 of the text>`, one date per line, validated on read and write, atomic writes, `prune`. `lineDiff.ts` `lineMap(baseline, current)` (the Myers script, exported as a per-line map) and `sourceDateModel.ts` (`formatSourceDate` with the IBM i's pivot at 40, `mapSourceDates`, `datesForLines`) put the baseline's dates on the edited text.
+- `CheckoutService`: `keepSourceDates(entry, hash)` after every download that sets a baseline (checkout, re-checkout, refresh when the baseline is the remote text, upload read-back, adopt), in the background, skipped when the setting is `off` or the dates are kept; `sourceDatesFor`, `sourceDatesMode` (user settings only), `onDidChangeSourceDates`; pruned with the baselines.
+- `sourceDatesEditor.ts`: a hover provider on checked-out files, a `before` gutter decoration over the visible lines (±100) in `gutter` mode, a lookup cached per document version and baseline, `toggleSourceDates`.
+- `bobMcpTools.ts`: `read_member_source` `includeDates` → `dates` (null for lines changed locally or never dated) and `datesNote` when none are kept or the texts differ too much; `ResearchIo.sourceDates`.
+- Manifest: setting `sourceDates` (`off | hover | gutter`, default `hover`, application scope); command `toggleSourceDates` in the member submenu (`3_open@2`), the tree (`1_open@4`) and the palette (a reader).
+
+**Validation**
+- `src/test/lineDiff.test.ts` (`lineMap`), `src/test/dateStore.test.ts`, `src/test/sourceDateModel.test.ts`, `src/test/bobMcpTools.test.ts` (`includeDates`), `manifest.test.ts` (scope, reader). The SRCDAT query was written from the source-file layout and not run against an IBM i before release. Manual: hover and gutter in the dev host over a member with a stubbed baseline.
+
+### 27. Compile on IBM i (shipped in 1.8.13)
+
+- `compileResult.ts` (vscode-free): `newestEvfevent`, `severityOf` (30 error, 20 warning, else information), `toDiagnostics` (1-based events to 0-based ranges, paths resolved to local files, unresolved files listed), `describeCounts`, `summarizeCompile`, `compileLibraries` (the member's library, then the current library and library list, deduplicated).
+- `codeForIBMi.ts`: `currentTimestamp`, `evfeventMembers(member, libraries, since)` over `SYSPARTITIONSTAT` (`SYSTEM_TABLE_NAME = 'EVFEVENT'`, `LAST_CHANGE_TIMESTAMP >= TIMESTAMP(?)`, newest first; EVFEVENT members have no source type, so `findSourceMembers` can't find them), `parseEvfevent` (Code for IBM i's exported `evfeventParser`).
+- `commands/compile.ts`: one editable checkout; `saveDirtyLocalFiles`; with local changes a modal offers Upload and Compile (`uploadWithConflictHandling`) or the IBM i's copy; `code-for-ibmi.runAction` with the `member:` URI, awaited; its `ActionResult` decides whether anything ran (`output` empty = dismissed) and words the summary; then the events are read with `downloadMemberContent(lib, "EVFEVENT", member)` and published on a second collection ("IBM i compile"), cleared on the next compile and on document close, and left to Code for IBM i when it already shows the same lines on the file. Buttons: Show Problems, Show Compile Listing (`listSpooledFiles` by name + `readSpooledFile`, 5000 lines), Show Job Log.
+- Manifest: `compileOnIbmi` in the member submenu (`2_run@2`), the tree (`2_merge@4`) and the palette (a writer), keybinding `ctrl+alt+b` / `cmd+alt+b`; no editor-title button (the title list is pinned).
+
+**Validation**
+- `src/test/compileResult.test.ts` (newest, ranges, severities, counts, summary, libraries), `manifest.test.ts` (writers). Code for IBM i's `runAction` return value and its EVFEVENT handling were read from its source (`src/commands/actions.ts`, `src/ui/actions.ts`, `src/ui/diagnostics.ts`); the flow was not run against an IBM i before release.
+
+### 28. Dependency diagram (shipped in 1.8.13)
+
+- `dependencyDiagram.ts` (vscode-free): `dependencyTreeText` (box-drawing tree, children under the last member of `via`, a name drawn in full once), `dependencyMermaid` (`graph LR`, one node per member, labels with quotes escaped, kind on the edge, unresolved references as dashed nodes), `dependencyMarkdown` (summary, the Mermaid fence, the tree in a text fence, a hint when no Mermaid renderer is installed).
+- `commands/dependencies.ts`: a second title button in the Find All Dependencies picker ("Show as Diagram", `type-hierarchy`), the walk remembered (`lastWalk`, context key `dependencyResultAvailable`), `showDependencyDiagram` through `ctx.reports.open(…, { extension: "md", show: !mermaidSupported })` and `markdown.showPreview` when `bierner.markdown-mermaid` is installed.
+- `reportProvider.ts` (new, shared through `CommandContext.reports`): the former private class of `commands/research.ts`, with `.md` and `show: false`.
+
+**Validation**
+- `src/test/dependencyDiagram.test.ts` (tree order, repeats, Mermaid shape, escaping, summary, hint). Manual: the picker's button and the preview with and without the Mermaid extension.
+
+### 29. Stale checkouts (shipped in 1.8.13)
+
+- `checkoutTreeModel.ts`: `checkoutAgeDays`, `isStale` (threshold 0 never; reference copies never), `staleEntries` (oldest first); `memberDescription`/`memberTooltip` take a `StaleCheck` and append the age.
+- `connectNotices.ts` (vscode-free): `staleMessage`; `commands/connectNotices.ts`: once per session per system, a few seconds after connecting (or at start when already connected), a warning with **Show** (focus the view and reveal the oldest). Setting `staleCheckoutDays` (default 14, 0 to 365; no IBM i access, so no application scope); the tree refreshes when it changes.
+
+**Validation**
+- `src/test/checkoutTreeModel.test.ts` (age, stale, description and tooltip), `src/test/connectNotices.test.ts` (messages).
+
+### 30. Unsent-changes notices (shipped in 1.8.13)
+
+- `codeForIBMi.ts`: `onConnectionChange` now subscribes to Code for IBM i once per event (each context/name pair must be unique there) and fans out through an `EventEmitter<"connected" | "disconnected">`, so listeners learn which event fired.
+- `connectNotices.ts`: `unsentChanges` (checkouts for change that are modified or in conflict), `listNames` (five, then "and N more"), `disconnectedMessage`, `reconnectedMessage`. `commands/connectNotices.ts` remembers the last host, reads `getEntriesForSystem` (an index read, no connection) on disconnect and confirms each with `hasLocalChanges`; on connect, after the stale notice, offers **Upload All…** (the Upload command with a multi-selection) and **Show**.
+
+**Validation**
+- `src/test/connectNotices.test.ts`. Manual: disconnect with a modified member; reconnect.
+
+### 31. Research tools: list_objects, find_field_usage, list_member_locks, describe_object for more types (shipped in 1.8.13)
+
+- `codeForIBMi.ts`: `listObjects(library, { types, namePattern, limit })` over `OBJECT_STATISTICS` (library and name bound; types validated and written in; `*ALL` or a generic name; 500 at most); `findFieldUsage(field, { file, libraries, memberLimit })` over `SYSCOLUMNS` (system or SQL column name, 200 files at most) plus `searchSourceMembers("*", …, { text })`; `describeObject(…, types, { includeValues })` extended to `*CMD` (`COMMAND_INFO`), `*DTAARA` (`TABLE(DATA_AREA_INFO(DATA_AREA_NAME =>, DATA_AREA_LIBRARY =>))`, value columns left out unless allowed), `*DTAQ` (`DATA_QUEUE_INFO`), `*JOBD` (`JOB_DESCRIPTION_INFO`), each `SELECT *` kept as `details` by column name, failures as notes; `DESCRIBABLE_TYPES`.
+- `bobMcpTools.ts`: the three tools (validated types, generic names and field names; `find_field_usage` returns `librariesSearched`; `list_member_locks` marks `thisConnection`), `describe_object`'s enum and `includeValues: io.allowDataSamples()`; `ResearchIo` gained `listObjects`, `findFieldUsage`, `memberLocks`; `SERVER_INSTRUCTIONS`, `RULES_BODY` (the 1.8.6–1.8.12 text frozen as `RULES_1_8_12` in `commands/bob.ts` for the upgrade) and the deep-dive prompt name them.
+- `commands/research.ts`: `research.findFieldUsage` (the editor's selection suggested; `fieldUsageReport`) and `research.memberLocks` (§25); the `allowDataSamples` setting's description now lists the data-area value.
+
+**Validation**
+- `src/test/bobMcpTools.test.ts` (the exact tool list, each tool's results and refusals, `describe_object` passing the permission through), `src/test/researchReport.test.ts` (`fieldUsageReport`), `src/test/bobPrompts.test.ts`. The SQL was written from the Db2 for i services documentation and not run against an IBM i before release.
+
+### 32. Activation smoke test (shipped in 1.8.13)
+
+- `src/test/vscode/runSmoke.ts` downloads a VS Code (`@vscode/test-electron` 3.x, which knows the `Code` executable of 1.110+) into `.vscode-test/`, writes a stub extension `halcyontechltd.code-for-ibmi` (an `instance` that is never connected, an `evfeventParser`) into a temporary folder, and starts VS Code with both development paths, a temporary workspace folder (the extension needs `storageUri`) and user-data folder, workspace trust off. `src/test/vscode/smoke.ts` runs inside: the extension is found, activates from `dist/extension.js`, every contributed command except Bob's (registered only in IBM Bob) is registered, and the refresh commands don't throw while disconnected. Neither file is a `node:test` file.
+- `npm run test:smoke`; CI job `smoke` on Ubuntu under `xvfb-run`, after the test matrix.
+
+**Validation**
+- The smoke test itself, locally on macOS and in CI. It found the Bob-only commands at once, which is why they are exempted.
+
 ## History
 
 Shipped before the requirements above were written down here (from the former HANDOFF.md):

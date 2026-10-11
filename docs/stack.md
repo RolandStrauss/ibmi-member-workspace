@@ -20,7 +20,8 @@ npm ci                  # install locked dependencies
 npm run compile         # tsc -p ./ -> out/
 npm run watch           # recompile on change; press F5 "VS Code Extension Development" to run
 npm run lint            # eslint src
-npm test                # compile, then node --test "out/test/**/*.test.js"
+npm test                # compile, bundle, then node --test "out/test/**/*.test.js"
+npm run test:smoke      # activate the bundled extension in a real VS Code (downloads one into .vscode-test/)
 npm run package         # build ibmi-member-workspace-<version>.vsix
 npm run package:list    # list files that would go into the VSIX
 ```
@@ -55,14 +56,14 @@ npm run compile && node --test --test-name-pattern="ignores a leading BOM" out/t
   - commands and settings are namespaced `ibmi-member-workspace.`;
   - settings that send code to the IBM i or run queries have `"scope": "application"`;
   - `version` is asserted literally;
-  - the VSIX contains only `package.json`, `readme.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE`, `images/icon.png`, `resources/*.svg` and `out/**/*.js` (not `out/test`). Any new root file or folder goes in `.vscodeignore`, which is why `docs/**` is listed there.
+  - the VSIX contains only `package.json`, `readme.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE`, `images/icon.png`, `resources/*.svg` and `dist/extension.js` (the esbuild bundle; `out/` stays out). Any new root file or folder goes in `.vscodeignore`, which is why `docs/**` is listed there.
 - **Security:** never read or write through symlinks in checkout or `.bob` paths. Use `execFile`, not a shell. End Git options with `--` before user-supplied names. Git runs without hooks, signing or fsmonitor, with `GIT_TERMINAL_PROMPT=0`. Keep tokens out of cloned projects. `untrustedWorkspaces.supported: false`.
 - **Cross-platform:** code must work on Windows (paths, command-line length, Git behavior). CI checks this.
 - **Commits:** plain-English subjects that describe the user-visible effect.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push, pull request and manual dispatch, on `ubuntu-latest`, `windows-latest` and `macos-latest` with Node 24: `npm ci`, `npm run lint`, `npm test`. Actions are pinned to commits, and the token is read-only.
+`.github/workflows/ci.yml` runs on every push, pull request and manual dispatch, on `ubuntu-latest`, `windows-latest` and `macos-latest` with Node 24: `npm ci`, `npm run lint`, `npm test`; then, on Ubuntu, `npm run test:smoke` under `xvfb-run` (a real VS Code with the bundled extension and a stub Code for IBM i). Actions are pinned to commits, and the token is read-only.
 
 ## Releases
 
